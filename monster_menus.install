@@ -19,8 +19,6 @@ function monster_menus_install() {
   // element overrides to work.
   db_query("UPDATE {system} SET weight = '100' WHERE filename LIKE '%/monster_menus.module'");
 
-  drupal_install_schema('monster_menus');
-
   db_query("INSERT INTO `{mm_tree}` (
    `mmtid`, `name`, `alias`, `parent`,`uid`,`default_mode`, `theme`, hidden) VALUES
       (1,  '[top]',     '',       0,     1,     'r',           '',     0),
