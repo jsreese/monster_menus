@@ -1,0 +1,338 @@
+<?php
+// $Id: mm_cck.module 5036 2011-02-15 20:29:26Z vquinn $
+
+/**
+ * @file
+ * CCK functions for Monster Menus
+ */
+
+/**
+ * Implementation of hook_field_info().
+ */
+function mm_cck_field_info() {
+  return array(
+    'mm_list' => array(
+      'label' => t('MM List'),
+      'description' => t('Contains a list of MM pages, groups, or users.'),
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_field_formatter_info().
+ */
+function mm_cck_field_formatter_info() {
+  return array(
+    'link' => array(
+      'label' => t('Link'),
+      'field types' => array('mm_list'),
+      'multiple values' => CONTENT_HANDLE_CORE,
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_theme().
+ */
+function mm_cck_theme() {
+  return array(
+    'mm_cck_formatter_link' => array(
+      'arguments' => array('element' => NULL),
+    )
+  );
+}
+
+function theme_mm_cck_formatter_link($element) {
+  $tree = mm_content_get($element['#item']['value']);
+  if ($tree) {
+    return l(mm_content_expand_name($tree->name), 'mm/' . $tree->mmtid);
+  }
+}
+
+function mm_cck_form_content_field_edit_form_alter(&$form, $form_state) {
+  if (isset($form['field']['multiple']) && in_array($form['#field']['widget']['type'], array_keys(mm_cck_widget_info()))) {
+    $form['field']['multiple']['#default_value'] = 1;
+    $form['field']['multiple']['#access'] = FALSE;
+    $form['field']['multiple']['#element_validate'] = array('_mm_cck_multiple_validate');
+  }
+}
+
+/**
+ * Implementation of hook_field_settings().
+ */
+function mm_cck_field_settings($op, $field) {
+  switch ($op) {
+    case 'form':
+      $form['mm_list_readonly'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Read-only'),
+        '#default_value' => isset($field['mm_list_readonly']) ? $field['mm_list_readonly'] : FALSE,
+        '#description' => t('If checked, the user can see the details of the entries in the list, but not change them'),
+      );
+      $form['fieldset_advanced'] = array(
+        '#type' => 'fieldset',
+        '#title' => t('Advanced'),
+      );
+      $form['fieldset_advanced']['mm_list_show_info'] = array(
+        '#type' => 'checkbox',
+        '#title' => t('Show an entry\'s details when clicked'),
+        '#default_value' => is_numeric($field['mm_list_show_info']) ? $field['mm_list_show_info'] : TRUE,
+      );
+      $form['fieldset_advanced']['mm_list_min'] = array(
+        '#type' => 'textfield',
+        '#size' => 4,
+        '#maxlength' => 4,
+        '#title' => t('Minimum number of entries'),
+        '#default_value' => is_numeric($field['mm_list_min']) ? $field['mm_list_min'] : 0,
+        '#description' => t('Set to 0 for no minimum'),
+      );
+      $form['fieldset_advanced']['mm_list_max'] = array(
+        '#type' => 'textfield',
+        '#size' => 4,
+        '#maxlength' => 4,
+        '#title' => t('Maximum number of entries'),
+        '#default_value' => is_numeric($field['mm_list_max']) ? $field['mm_list_max'] : 0,
+        '#description' => t('Set to 0 for no limit'),
+      );
+
+      if ($field['widget']['type'] != 'mm_userlist') {
+        $form['fieldset_advanced']['mm_list_popup_start'] = array(
+          '#type' => $field['widget']['type'],
+          '#title' => t('Initial location to display when choosing:'),
+          '#default_value' => is_array($field['mm_list_popup_start']) ? $field['mm_list_popup_start'] : array(),
+          '#mm_list_max' => 1,
+        );
+      }
+
+      $x = mm_ui_strings(FALSE);
+      $options = array(
+        'w' => t('delete it or change its settings', $x),
+        'a' => t('append @subthings to it', $x),
+        'u' => t('add content to it', $x),
+        'r' => t('read it', $x));
+
+      if ($field['widget']['type'] == 'mm_catlist' || $field['widget']['type'] == 'mm_nodelist') {
+        $form['fieldset_advanced']['mm_list_enabled'] = array(
+          '#type' => 'select',
+          '#title' => t('In order to <em>expand</em> a @thing and see its @subthings, the user must be able to', $x),
+          '#options' => $options,
+          '#default_value' => isset($field['mm_list_enabled']) ? $field['mm_list_enabled'] : 'r',
+        );
+        $form['fieldset_advanced']['mm_list_selectable'] = array(
+          '#type' => 'select',
+          '#title' => t('In order to <em>select</em> a @thing, the user must be able to', $x),
+          '#options' => $options,
+          '#default_value' => isset($field['mm_list_selectable']) ? $field['mm_list_selectable'] : 'u',
+        );
+        if ($field['widget']['type'] == 'mm_nodelist') {
+          $form['fieldset_advanced']['mm_list_selectable']['#title'] = t('In order to <em>select nodes</em> from this page, the user must be able to', $x);
+          $all_node_types = node_get_types();
+          foreach($all_node_types as $node_type) {
+            $node_types[$node_type->type] = $node_type->name;
+          }
+          $form['fieldset_advanced']['mm_list_nodetypes'] = array(
+            '#type' => 'checkboxes',
+            '#title' => t('Allowed node types'),
+            '#description' => t('If no node types are selected above, then any type of node may be selected in the node chooser.'),
+            '#options' => $node_types,
+            '#default_value' => isset($field['mm_list_nodetypes']) ? $field['mm_list_nodetypes'] : TRUE,
+          );
+        }
+      }
+      return $form;
+
+    case 'save':
+      $list = array('mm_list_readonly', 'mm_list_show_info', 'mm_list_min', 'mm_list_max');
+
+      if ($field['widget']['type'] != 'mm_userlist') {
+        $list[] = 'mm_list_popup_start';
+      }
+
+      if ($field['widget']['type'] == 'mm_catlist') {
+        $list = array_merge($list, array('mm_list_enabled', 'mm_list_selectable'));
+      }
+
+      if ($field['widget']['type'] == 'mm_nodelist') {
+        $list = array_merge($list, array('mm_list_enabled', 'mm_list_selectable', 'mm_list_nodetypes'));
+      }
+
+      return $list;
+
+    case 'database columns':
+      if ($field['widget']['type'] == 'mm_nodelist') {
+        $columns['mmtid'] = array('type' => 'int', 'not null' => FALSE, 'sortable' => TRUE);
+        $columns['nid'] = array('type' => 'int', 'not null' => FALSE, 'sortable' => TRUE);
+      }
+      else {
+        $columns['value'] = array('type' => 'int', 'not null' => FALSE, 'sortable' => TRUE);
+      }
+      return $columns;
+
+    case 'views data':
+      $data = content_views_field_views_data($field);
+      $db_info = content_database_info($field);
+      $table_alias = content_views_tablename($field);
+
+      // Filter: swap the handler to the 'in' operator.
+      $data[$table_alias][$field['field_name'] .'_value']['filter']['handler'] = 'content_handler_filter_many_to_one';
+      // Relationship: add a relationship for related MM page.
+      $data[$table_alias][$field['field_name'] .'_value']['relationship'] = array(
+        'base' => 'mm_node2tree',
+        'base field' => 'mmtid',
+        'field' => $db_info['columns']['value']['column'],
+        'handler' => 'content_handler_relationship',
+        'label' => t('Nodes on pages'),
+        'content_field_name' => $field['field_name'],
+      );
+      return $data;
+  }
+}
+
+/**
+ * Implementation of hook_content_is_empty().
+ */
+function mm_cck_content_is_empty($item, $field) {
+  return FALSE;
+}
+
+/**
+ * Implementation of hook_widget_info().
+ */
+function mm_cck_widget_info() {
+  return array(
+    'mm_catlist' => array(
+      'label' => 'MM Page chooser',
+      'description' => t('Lets the user choose one or more MM pages. The data is stored in an integer field.'),
+      'field types' => array('mm_list'),
+      'multiple values' => CONTENT_HANDLE_MODULE,
+    ),
+    'mm_nodelist' => array(
+      'label' => 'MM Node chooser',
+      'description' => t('Lets the user choose one or more MM nodes. The data is stored in an integer field.'),
+      'field types' => array('mm_list'),
+      'multiple values' => CONTENT_HANDLE_MODULE,
+    ),
+    'mm_grouplist' => array(
+      'label' => 'MM Group chooser',
+      'description' => t('Lets the user choose one or more MM groups. The data is stored in an integer field.'),
+      'field types' => array('mm_list'),
+      'multiple values' => CONTENT_HANDLE_MODULE,
+    ),
+    'mm_userlist' => array(
+      'label' => 'MM User chooser',
+      'description' => t('Lets the user choose one or more MM users. The data is stored in an integer field.'),
+      'field types' => array('mm_list'),
+      'multiple values' => CONTENT_HANDLE_MODULE,
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_widget().
+ */
+function mm_cck_widget(&$form, &$form_state, $field, $items, $delta = NULL) {
+  if ($delta > 0) return;
+
+  $values = array();
+  if (is_array($items)) {
+    $ids = array();
+    foreach ($items as $item)
+      $ids[] = $item['value'];
+
+    if ($field['widget']['type'] == 'mm_userlist') {
+      foreach ($ids as $uid)
+        $values[$uid] = mm_ui_uid2name($uid);
+    }
+    else {
+      $tree = mm_content_get($ids);
+      if ($tree)
+        foreach ($tree as $item)
+          $values[$item->mmtid] = mm_content_expand_name($item->name);
+    }
+  }
+
+  $element = array(
+    '#type' => $field['widget']['type'],
+    '#default_value' => $values,
+    '#element_validate' => array('_mm_cck_mm_list_validate'),
+  );
+  $setting_names = module_invoke($field['module'], 'field_settings', 'save', $field);
+  if (is_array($setting_names))
+    foreach ($setting_names as $setting) {
+      if ($setting == 'mm_list_popup_start') {
+        $element['#mm_list_popup_start'] = is_array($field['mm_list_popup_start']) ? join('/', array_keys($field['mm_list_popup_start'])) : '';
+      }
+      else {
+        if ($setting == 'mm_list_show_info') $setting = 'mm_list_no_info';
+        $element["#$setting"] = $field[$setting];
+      }
+    }
+
+  if ($field['widget']['type'] == 'mm_userlist') {
+    $group_name = 'mm_userlist_group_' . $field['field_name'];
+    $auto_name = $field['field_name'] . '[' . $field['field_name'] . '-choose]';
+    $element['#mm_list_autocomplete_name'] = $auto_name;
+
+    $group = array($field['field_name'] => $element);
+    $group[$field['field_name'] . '-choose'] = array(
+      '#type' => 'textfield',
+      '#title' => $element['#mm_list_max'] == 1 ? t('Choose the user') : t('Add a user'),
+      '#autocomplete_path' => 'mm-auto',
+      '#description' => t('Type part of the person\'s last name, first name, or username. Choose a name from the list. If there are too many matches, use the format %lastfirst.',
+        array('%lastfirst' => t('last name, first name'))),
+      '#size' => 30, '#maxlength' => 40,
+    );
+    return $group;
+  }
+  else if ($field['widget']['type'] == 'mm_nodelist') {
+    drupal_add_js(array('browserType' => 'mm_nodelist'), 'setting');
+    $mmlist = array();
+    foreach($items as $item) {
+      if ($item['nid']) {
+        if (array_search($item['mmtid'], $mmtids = mm_content_get_by_nid($item['nid'])) !== FALSE)
+            $tree = mm_content_get($item['mmtid']);
+        else
+            $tree = mm_content_get($mmtids[0]);
+
+        $node = node_load($item['nid']);
+        if ($node->type == 'media') {
+          $filename = db_result(db_query('SELECT uploadedfilename FROM {media_files} WHERE nid = %d', $item['nid']));
+          if ($filename) {
+            if ($tree) $mmlist[$tree->mmtid . '/' . $item['nid']] = $filename;
+            else $mmlist['0/' . $item['nid']] = $filename;
+          }
+        }
+        else {
+          $mmlist[$tree->mmtid . '/' . $item['nid']] = $node->title;
+        }
+      }
+      else {
+        $tree = mm_content_get($item['mmtid']);
+        if ($tree) $mmlist[$tree->mmtid] = mm_content_expand_name($tree->name) . ' ' . t('(all)');
+      }
+    }
+    $element['#default_value'] = $mmlist;
+  }
+  return $element;
+}
+
+function _mm_cck_mm_list_validate(&$element, &$form_state, $form) {
+  eval('$ref =& $form_state["values"]["' . implode('"]["', $element['#parents']) . '"];');
+
+  $new = array();
+  foreach (array_keys($ref) as $mmtid) {
+    if ($element['#type'] === 'mm_nodelist') {
+      $mmtid_node = explode('/', $mmtid);
+      $new[] = array('mmtid' => $mmtid_node[0], 'nid' => $mmtid_node[1]);
+    }
+    else {
+      $new[] = array('value' => $mmtid);
+    }
+  }
+  $form_state["values"][$element["#parents"][0]] = $new;
+}
+
+function _mm_cck_multiple_validate(&$element, &$form_state, $form) {
+  $max = $form_state['values']['mm_list_max'];
+  $form_state['values']['multiple'] = $max == 0 || $max == 1 ? $max ^ 1 : $max;
+}

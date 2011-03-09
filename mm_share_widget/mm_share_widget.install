@@ -1,0 +1,134 @@
+<?php
+// $Id: mm_share_widget.install 3866 2010-02-16 15:47:23Z dan $
+
+/**
+ * Implementation of hook_schema().
+ */
+function mm_share_widget_schema() {
+  $schema['mm_share_widget'] = array(
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '10',
+      ),
+      'vid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '10',
+      ),
+      'share_id' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '10',
+      ),
+    ),
+    'primary key' => array('nid', 'vid', 'share_id'),
+  );
+  $schema['mm_share_log'] = array(
+    'fields' => array(
+      'logid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'share_type' => array(
+        'type' => 'varchar',
+        'length' => '50',
+        'not null' => TRUE,
+      ),
+      'share_url' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE,
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'not null' => FALSE,
+        'disp-width' => '11'
+      ),
+      'ctime' => array(
+        'type' => 'int',
+        'not null' => FALSE,
+        'disp-width' => '11'
+      ),
+    ),
+    'primary key' => array('logid'),
+    'indexes' => array(
+      'share_type' => array('share_type'),
+      'ctime' => array('ctime'),
+    ),
+  );
+  return $schema;
+}
+
+/**
+ * Implementation of hook_install().
+ */
+function mm_share_widget_install() {
+  drupal_install_schema('mm_share_widget');
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function mm_share_widget_uninstall() {
+  drupal_uninstall_schema('mm_share_widget');
+}
+
+/**
+ * Implementation of hook_mm_verify_integrity()
+ */
+function mm_share_widget_mm_verify_integrity() {
+  return array('MM Share Widget' => array(
+    t('mm_share_widget.nid refers to missing node.nid') =>
+      "{mm_share_widget} x LEFT JOIN {node} n ON n.nid=x.nid WHERE n.nid IS NULL",
+    t('mm_share_widget.vid refers to missing node_revisions.vid') =>
+      "{mm_share_widget} x LEFT JOIN {node_revisions} n ON n.vid=x.vid WHERE n.vid IS NULL",
+
+    t('mm_share_widget.share_id refers to missing share.share_id') =>
+      "{mm_share_widget} x LEFT JOIN {share} s ON s.share_id=x.share_id WHERE s.share_id IS NULL",
+  ));
+}
+
+function mm_share_widget_update_6000() {
+  $ret = array();
+  db_create_table($ret, 'mm_share_log', array(
+    'fields' => array(
+      'logid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'share_type' => array(
+        'type' => 'varchar',
+        'length' => '50',
+        'not null' => TRUE,
+      ),
+      'share_url' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE,
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'not null' => FALSE,
+        'disp-width' => '11'
+      ),
+      'ctime' => array(
+        'type' => 'int',
+        'not null' => FALSE,
+        'disp-width' => '11'
+      ),
+    ),
+    'primary key' => array('logid'),
+    'indexes' => array(
+      'share_type' => array('share_type'),
+      'ctime' => array('ctime'),
+    ),
+  ));
+  return $ret;
+}

@@ -1,0 +1,2178 @@
+<?php
+// $Id: monster_menus.install 5017 2011-02-09 20:40:29Z dan $
+
+/**
+ * @file
+ * Installation routines for Monster Menus
+ */
+
+/**
+ * Implementation of hook_install()
+ */
+function monster_menus_install() {
+  // If not in 'safe mode', increase the maximum execution time:
+  if (!ini_get('safe_mode')) {
+    set_time_limit(600);
+  }
+
+  // Make sure MM's hooks run later than all others. This allows various form
+  // element overrides to work.
+  db_query("UPDATE {system} SET weight = '100' WHERE filename LIKE '%/monster_menus.module'");
+
+  drupal_install_schema('monster_menus');
+
+  db_query("INSERT INTO `{mm_tree}` (
+   `mmtid`, `name`, `alias`, `parent`,`uid`,`default_mode`, `theme`, hidden) VALUES
+      (1,  '[top]',     '',       0,     1,     'r',           '',     0),
+      (2,  '.Groups',   'groups', 1,     1,     'r',           '',     0),
+      (3,  '.Virtual',  '',       2,     1,     'r',           '',     0),
+      (4,  '.Users',    'users',  1,     1,     'r',           '',     0),
+      (5,  '.Default',  '',       4,     1,     'r',           '',     0),
+      (6,  '.Files',    '',       4,     1,     'r',           '',     0),
+      (7,  'Home',      '',       1,     1,     'r',           '',     0),
+      (8,  '.Disabled', '',       4,     1,     '',            '',     0),
+      (9,  'Error',     'error',  7,     1,     'r',           '',     1),
+      (10, 'My Portal', 'portal', 5,     1,     '',            '',     0),
+      (11, 'Upper left picture','default-image',7,1,'r',       '',     0),
+      (12, 'Not Found', 'not-found',7,   1,     'r',           '',     1),
+      (13, 'Authorization Required','denied',7,1,'r',          '',     1),
+      (14, 'Portal Pages','portal-pages',7,1,   'r',           '',     1),
+      (15, '.Applicants','',      4,     1,     'r',           '',     0)
+      ");
+  $vgroup_mmtid =  3;
+  $error_gen =   9;
+  $error_404 =  12;
+  $error_403 =  13;
+
+  mm_content_update_parents(NULL, NULL, FALSE, TRUE);
+  mm_content_groups_mmtid();
+  mm_content_users_mmtid();
+
+  db_query("INSERT INTO `{mm_tree_flags}` (`mmtid`, `flag`) VALUES
+      (5,  'limit_alias'),
+      (5,  'limit_move'),
+      (5,  'limit_delete'),
+      (5,  'limit_hidden'),
+      (5,  'limit_location'),
+      (5,  'limit_name'),
+      (5,  'limit_write'),
+      (6,  'limit_alias'),
+      (6,  'limit_move'),
+      (6,  'limit_delete'),
+      (6,  'limit_hidden'),
+      (6,  'limit_location'),
+      (6,  'limit_name'),
+      (6,  'limit_write'),
+      (15, 'no_breadcrumb')
+      ");
+
+  // MM blocks
+  db_query("INSERT INTO `{mm_block}` (`bid`, `name`, `title`, `title_is_cat`, `show_node_contents`, `help`) VALUES
+      (1, 'New sub-section', '', '', '', 'Creates a new left navigation menu section and makes this page the top page of the section.'),
+      (2, 'Upper left picture', '', '', '1', 'Lets you upload a 200 by 130 pixel image to replace the image appearing above the left-hand navigation menu on the parent page and all sub-pages.'),
+      (3, 'Text for right column', '', '', '1', 'The contents of the current page will appear in the right-hand column of the parent page and all sub-pages.')
+      ");
+  // Assign MM blocks to default nodes
+  db_query("INSERT INTO `{mm_tree_block}` (`mmtid`, `bid`, `max_depth`, `max_parents`) VALUES
+      (2, 1, -1, 5),
+      (4, 1, -1, -1),
+      (5, 1, -1, -1),
+      (7, 1, -1, -1),
+      (11,2, -1, -1)
+      ");
+
+  module_load_include('inc', 'monster_menus', 'mm_content');
+  // Default virtual groups
+  foreach (array(
+      'All logged-in users' => array('uid', 'FROM users WHERE uid>0'),
+      ) as $name => $list) {
+    $mmtid = mm_content_insert_or_update(TRUE, $vgroup_mmtid, array('name' => $name, 'default_mode' => 'r,u', 'qfield' => $list[0], 'qfrom' => $list[1]));
+  }
+
+  mm_content_update_sort();
+
+  // After creating virtual groups, update the mm_virtual_group results table
+  module_load_include('module', 'monster_menus', 'monster_menus');
+  mm_regenerate_vgroup();
+
+  module_load_include('inc', 'monster_menus', 'mm_ui');  // for monster_menus_nodeapi()
+  _mm_install_node_add(array(
+      'type' => 'page', 'title' => '', 'body' => '', 'mm_catlist' => array($error_gen => 'Error')));
+  _mm_install_node_add(array(
+      'type' => 'page', 'title' => 'Not Found', 'body' => 'The page you tried to access was not found.',
+      'mm_catlist' => array($error_404 => 'Not Found')));
+  _mm_install_node_add(array(
+      'type' => 'page', 'title' => 'Authorization Required', 'body' => 'You do not have permission to read the contents of this page. <p>If you are not already logged into the system, you may be able to access the page once you do so.</p>',
+      'mm_catlist' => array($error_403 => 'Authorization Required')));
+
+  // Default allowed node types
+  db_query('INSERT IGNORE INTO {mm_allowed_node} (mmtid, type) SELECT %d, type FROM {node_type}', 4);
+  db_query('INSERT IGNORE INTO {mm_allowed_node} (mmtid, type) SELECT %d, type FROM {node_type}', 7);
+
+  drupal_set_message(t('Monster Menus has been enabled.'));
+}
+
+/**
+ * Implementation of hook_uninstall()
+ */
+function monster_menus_uninstall() {
+  drupal_uninstall_schema('monster_menus');
+  $unset = array(
+    'mm_comments_readable_labels',
+    'mm_content_groups_mmtid',
+    'mm_content_users_alias',
+    'mm_content_users_mmtid',
+    'mm_cron_run_count',
+    'mm_cron_run_last',
+    'mm_cron_run_since',
+    'mm_default_homepage',
+    'mm_enable_rss',
+    'mm_finegrain_comment_readability',
+    'mm_hide_empty_pages',
+    'mm_home_mmtid',
+    'mm_node_alert_frequency',
+    'mm_node_gallery_final_deriv',
+    'mm_node_gallery_flow_per_page',
+    'mm_node_gallery_grid_cols',
+    'mm_node_gallery_grid_rows',
+    'mm_node_gallery_mode',
+    'mm_node_gallery_show_caption',
+    'mm_node_gallery_show_comment',
+    'mm_node_gallery_show_title',
+    'mm_node_gallery_single_start',
+    'mm_node_gallery_thumb_deriv',
+    'mm_recycle_auto_empty',
+    'mm_reserved_alias',
+    'mm_show_count_instead_of_comments',
+    'mm_show_permalink',
+    'mm_use_user_dir',
+    'mm_use_virtual_user_dir',
+    'mm_username_admin',
+    'mm_username_anon',
+    'mm_username_disabled',
+    'mm_vgroup_regen_chunk',
+  );
+  foreach ($unset as $name)
+    variable_del($name);
+}
+
+/**
+ * Implementation of hook_schema().
+ */
+function monster_menus_schema() {
+  $schema = array();
+  $schema['mm_archive'] = array(
+    'fields' => array(
+      'main_mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'archive_mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'frequency' => array(
+        'type' => 'varchar',
+        'length' => '5',
+        'not null' => TRUE,
+      ),
+      'main_nodes' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '10',
+      ),
+    ),
+    'primary key' => array('main_mmtid'),
+    'indexes' => array(
+      'archive_mmtid' => array('archive_mmtid'),
+    ),
+  );
+  $schema['mm_block'] = array(
+    'fields' => array(
+      'bid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'name' => array(
+        'type' => 'varchar',
+        'length' => '128',
+        'not null' => TRUE,
+      ),
+      'title' => array(
+        'type' => 'varchar',
+        'length' => '256',
+        'not null' => FALSE,
+      ),
+      'title_is_cat' => array(
+        'type' => 'varchar',
+        'length' => '1',
+        'not null' => TRUE,
+        'default' => '1',
+      ),
+      'show_node_contents' => array(
+        'type' => 'varchar',
+        'length' => '1',
+        'not null' => TRUE,
+      ),
+      'help' => array(
+        'type' => 'varchar',
+        'length' => '512',
+        'not null' => TRUE,
+      ),
+      'allow_rss' => array(
+        'type' => 'varchar',
+        'length' => '1',
+        'not null' => TRUE,
+        'default' => '1',
+      ),
+      'admin_only' => array(
+        'type' => 'varchar',
+        'length' => '1',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('bid'),
+  );
+  $schema['mm_cascaded_settings'] = array(
+    'fields' => array(
+      'id' => array(
+        'type' => 'serial',
+        'size' => 'big',
+        'not null' => TRUE,
+        'disp-width' => '20',
+      ),
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'name' => array(
+        'type' => 'varchar',
+        'length' => '32',
+        'not null' => TRUE,
+      ),
+      'data_type' => array(
+        'type' => 'varchar',
+        'length' => '10',
+        'not null' => TRUE,
+      ),
+      'multiple' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'array_key' => array(
+        'type' => 'varchar',
+        'length' => '32',
+        'not null' => TRUE,
+      ),
+      'data' => array(
+        'type' => 'varchar',
+        'length' => '512',
+        'not null' => FALSE,
+      ),
+    ),
+    'primary key' => array('id'),
+    'indexes' => array(
+      'mmtid' => array('mmtid'),
+      'name' => array('name'),
+      'data' => array('data'),
+      'array_key' => array('array_key'),
+    ),
+  );
+  $schema['mm_group'] = array(
+    'fields' => array(
+      'gid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'vgid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '11',
+      ),
+    ),
+    'primary key' => array('gid', 'uid'),
+    'indexes' => array(
+      'vgid' => array('vgid'),
+      'gid' => array('gid'),
+      'uid' => array('uid'),
+    ),
+  );
+  $schema['mm_group_temp'] = array(
+    'fields' => array(
+      'gid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'sessionid' => array(
+        'type' => 'varchar',
+        'length' => '64',
+        'default' => ''
+      ),
+    ),
+    'primary key' => array('gid', 'uid', 'sessionid'),
+    'indexes' => array(
+      'sessionid' => array('sessionid'),
+      'gid' => array('gid'),
+      'uid' => array('uid'),
+    ),
+  );
+  $schema['mm_node2tree'] = array(
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+    ),
+    'primary key' => array('nid', 'mmtid'),
+    'indexes' => array(
+      'nid' => array('nid'),
+      'mmtid' => array('mmtid'),
+    ),
+  );
+  $schema['mm_node_info'] = array(
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '10'
+      ),
+      'show_node_info' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'disp-width' => '4'
+      ),
+      'comments_readable' => array(
+        'type' => 'varchar',
+        'length' => '128',
+        'default' => ''
+      ),
+    ),
+    'primary key' => array('nid'),
+  );
+  $schema['mm_node_redir'] = array(
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'vid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'url' => array(
+        'type' => 'blob',
+        'not null' => FALSE
+      ),
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => FALSE,
+        'disp-width' => '11'
+      )
+    ),
+    'primary key' => array('nid', 'vid'),
+    'indexes' => array(
+      'mmtid' => array('mmtid')
+    ),
+  );
+  $schema['mm_node_reorder'] = array(
+    'fields' => array(
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '10',
+      ),
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '10',
+      ),
+      'weight' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '11',
+      ),
+    ),
+    'primary key' => array('mmtid', 'nid'),
+  );
+  $schema['mm_node_schedule'] = array(
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'publish_on' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'unpublish_on' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'set_change_date' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+      )
+    ),
+    'primary key' => array('nid'),
+  );
+  $schema['mm_role2group'] = array(
+    'fields' => array(
+      'rid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'gid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'negative' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '1'
+      )
+    ),
+    'primary key' => array('rid'),
+    'indexes' => array(
+      'gid' => array('gid')
+    ),
+  );
+  $schema['mm_node_gallery'] = array(
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'vid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'mode' => array(
+        'type' => 'varchar',
+        'length' => 6,
+        'not null' => TRUE,
+      ),
+      'link_text' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => FALSE,
+      ),
+      'grid_cols' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => FALSE,
+        'disp-width' => '11',
+      ),
+      'grid_rows' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => FALSE,
+        'disp-width' => '11',
+      ),
+      'thumb_deriv' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE,
+      ),
+      'final_deriv' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE,
+      ),
+      'flow_per_page' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => FALSE,
+        'disp-width' => '11',
+      ),
+      'single_start' => array(
+        'type' => 'varchar',
+        'length' => 6,
+        'not null' => TRUE,
+      ),
+      'show_title' => array(
+        'type' => 'varchar',
+        'length' => '1',
+        'not null' => TRUE,
+      ),
+      'show_comment' => array(
+        'type' => 'varchar',
+        'length' => '1',
+        'not null' => TRUE,
+      ),
+      'show_caption' => array(
+        'type' => 'varchar',
+        'length' => '1',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('nid', 'vid'),
+    'indexes' => array(
+      'vid' => array('vid'),
+    ),
+  );
+  $schema['mm_node_gallery_imgs'] = array(
+    'fields' => array(
+      'id' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'vid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'img_mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'img_nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '11'
+      )
+    ),
+    'primary key' => array('id'),
+    'indexes' => array(
+      'img_mmtid' => array('img_mmtid'),
+      'img_nid' => array('img_nid'),
+      'nid' => array('nid'),
+      'vid' => array('vid')
+    ),
+  );
+  $schema['mm_node_subpglist'] = array(
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'vid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'columns' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'disp-width' => '4'
+      ),
+      'depth' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'disp-width' => '4',
+      ),
+      'outer_prefix' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE
+      ),
+      'column_prefix' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE
+      ),
+      'section_prefix' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE,
+      ),
+      'title_prefix' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE,
+      ),
+      'title_suffix' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE,
+      ),
+      'row_prefix' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE
+      ),
+      'row_suffix' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE
+      ),
+      'section_suffix' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE,
+      ),
+      'column_suffix' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE
+      ),
+      'outer_suffix' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => TRUE
+      ),
+      'postamble' => array(
+        'type' => 'text',
+        'size' => 'big',
+        'not null' => TRUE
+      )
+    ),
+    'primary key' => array('nid', 'vid'),
+    'indexes' => array(
+      'vid' => array('vid'),
+    ),
+  );
+  $schema['mm_node_write'] = array(
+    'fields' => array(
+      'id' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'size' => 'big',
+        'not null' => TRUE,
+        'disp-width' => '20'
+      ),
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'gid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'disp-width' => '11'
+      )
+    ),
+    'primary key' => array('id'),
+    'indexes' => array(
+      'nid' => array('nid'),
+      'gid' => array('gid'),
+    ),
+  );
+  $schema['mm_recycle'] = array(
+    'fields' => array(
+      'type' => array(
+        'type' => 'varchar',
+        'length' => 4,
+        'not null' => TRUE
+      ),
+      'id' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '10'
+      ),
+      'from_mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '11'
+      ),
+      'bin_mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '11'
+      ),
+      'recycle_date' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '11'
+      )
+    ),
+    'primary key' => array('type', 'id', 'from_mmtid'),
+    'indexes' => array(
+      'id' => array('id'),
+      'type' => array('type'),
+    ),
+  );
+  $schema['mm_tree_access'] = array(
+    'fields' => array(
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'gid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'mode' => array(
+        'type' => 'varchar',
+        'length' => 1,
+        'not null' => TRUE
+      ),
+    ),
+    'primary key' => array('mmtid', 'gid', 'mode'),
+    'indexes' => array(
+      'mmtid' => array('mmtid'),
+      'gid' => array('gid'),
+      'mode' => array('mode'),
+    ),
+  );
+  $schema['mm_tree'] = array(
+    'fields' => array(
+      'mmtid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'vid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'name' => array(
+        'type' => 'varchar',
+        'length' => '128',
+        'not null' => TRUE
+      ),
+      'alias' => array(
+        'type' => 'varchar',
+        'length' => '128',
+        'not null' => FALSE
+      ),
+      'parent' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => FALSE,
+        'disp-width' => '11'
+      ),
+      'default_mode' => array(
+        'type' => 'varchar',
+        'length' => 7,
+        'not null' => FALSE
+      ),
+      'weight' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '4'
+      ),
+      'theme' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => FALSE
+      ),
+      'sort_idx' => array(
+        'type' => 'varchar',
+        'length' => min(intval(255 / MM_CONTENT_BTOA_CHARS), MM_CONTENT_MYSQL_MAX_JOINS) * MM_CONTENT_BTOA_CHARS,
+        'not null' => FALSE
+      ),
+      'sort_idx_dirty' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE
+      ),
+      'hover' => array(
+        'type' => 'varchar',
+        'length' => '128',
+        'not null' => FALSE
+      ),
+      'rss' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '3'
+      ),
+      'ctime' => array(
+        'type' => 'int',
+        'not null' => FALSE,
+        'disp-width' => '11'
+      ),
+      'cuid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => FALSE,
+        'disp-width' => '10'
+      ),
+      'node_info' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'default' => 1,
+        'disp-width' => '4'
+      ),
+      'previews' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'default' => 0,
+        'disp-width' => '4'
+      ),
+      'hidden' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'default' => 0,
+        'disp-width' => '4'
+      ),
+      'comment' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'default' => 0,
+        'disp-width' => '4'
+      )
+    ),
+    'primary key' => array('mmtid'),
+    'indexes' => array(
+      'name' => array('name'),
+      'sort_idx' => array('sort_idx'),
+      'sort_idx_dirty' => array('sort_idx_dirty'),
+      'vid' => array('vid'),
+      'weight' => array('weight')
+    ),
+  );
+  $schema['mm_tree_block'] = array(
+    'fields' => array(
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'bid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => -1,
+        'disp-width' => '11'
+      ),
+      'max_depth' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => -1,
+        'disp-width' => '4'
+      ),
+      'max_parents' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => -1,
+        'disp-width' => '4'
+      ),
+    ),
+    'primary key' => array('mmtid', 'bid'),
+    'indexes' => array(
+      'mmtid' => array('mmtid'),
+      'bid' => array('bid'),
+    ),
+  );
+  $schema['mm_tree_flags'] = array(
+    'fields' => array(
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'flag' => array(
+        'type' => 'varchar',
+        'length' => '64',
+        'not null' => TRUE,
+      ),
+      'data' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => FALSE,
+      ),
+    ),
+    'primary key' => array('mmtid', 'flag'),
+    'indexes' => array(
+      'data' => array('data'),
+      'flag' => array('flag'),
+    ),
+  );
+  $schema['mm_tree_parents'] = array(
+    'fields' => array(
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'parent' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'depth' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'size' => 'small',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('mmtid', 'parent'),
+    'indexes' => array(
+      'depth' => array('depth'),
+      'mmtid' => array('mmtid'),
+      'parent' => array('parent'),
+    ),
+  );
+  $schema['mm_tree_revisions'] = array(
+    'fields' => array(
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'vid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'name' => array(
+        'type' => 'varchar',
+        'length' => '128',
+        'not null' => TRUE
+      ),
+      'alias' => array(
+        'type' => 'varchar',
+        'length' => '128',
+        'not null' => FALSE
+      ),
+      'parent' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => FALSE,
+        'disp-width' => '11'
+      ),
+      'default_mode' => array(
+        'type' => 'varchar',
+        'length' => 7,
+        'not null' => FALSE
+      ),
+      'theme' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => FALSE
+      ),
+      'hover' => array(
+        'type' => 'varchar',
+        'length' => '128',
+        'not null' => FALSE
+      ),
+      'rss' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '3'
+      ),
+      'mtime' => array(
+        'type' => 'int',
+        'not null' => FALSE,
+        'disp-width' => '11'
+      ),
+      'muid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => FALSE,
+        'disp-width' => '10'
+      ),
+      'node_info' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'default' => 1,
+        'disp-width' => '4'
+      ),
+      'previews' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'default' => 0,
+        'disp-width' => '4'
+      ),
+      'hidden' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'default' => 0,
+        'disp-width' => '4'
+      ),
+      'comment' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'default' => 0,
+        'disp-width' => '4'
+      ),
+    ),
+    'primary key' => array('vid'),
+    'indexes' => array(
+      'mmtid' => array('mmtid'),
+      'alias' => array('alias'),
+      'parent' => array('parent'),
+    ),
+  );
+  $schema['mm_vgroup_query'] = array(
+    'fields' => array(
+      'vgid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'field' => array(
+        'type' => 'varchar',
+        'length' => '40',
+        'not null' => TRUE
+      ),
+      'qfrom' => array(
+        'type' => 'text',
+        'not null' => FALSE
+      ),
+      'dirty' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '1'
+      )
+    ),
+    'primary key' => array('vgid'),
+    'indexes' => array(
+      'dirty' => array('dirty')
+    ),
+  );
+  $schema['mm_virtual_group'] = array(
+    'fields' => array(
+      'vgid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '10'
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '10'
+      ),
+      'preview' => array(
+        'type' => 'int',
+        'size' => 'small',
+        'not null' => FALSE,
+        'disp-width' => '6'
+      )
+    ),
+    'primary key' => array('vgid', 'uid'),
+    'indexes' => array(
+      'preview' => array('preview'),
+      'vgid' => array('vgid'),
+      'uid' => array('uid'),
+    ),
+  );
+  $schema['mm_tree_bookmarks'] = array(
+    'fields' => array(
+      'bmid' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'type' => array(
+        'type' => 'varchar',
+        'length' => '20',
+        'not null' => TRUE,
+      ),
+      'weight' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'data' => array(
+        'type' => 'text',
+        'size' => 'big',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('bmid'),
+  );
+  return $schema;
+}
+
+function _mm_install_node_add( $arr ) {
+  global $user;
+  $arr = array_merge($arr, array(
+    'nid' => '',
+    'vid' => '',
+    'uid' => $user->uid,
+    'owner' => array($user->uid => 'Administrator'),
+    'groups_w' => array(),
+    'users_w' => array(),
+    'others_w' => 0,
+    'comment' => 0,
+    'teaser' => '',
+    'status' => 1,
+    'moderate' => '',
+    'promote' => '',
+    'sticky' => '',
+    'revision' => 1,
+    'name' => $user->name,
+    'validated' => 1
+  ));
+  $node = (object)$arr;
+  node_save($node);
+  // monster_menus_nodeapi() isn't called during node_save(), because this module
+  // isn't registered yet, so call it now
+  monster_menus_nodeapi($node, 'insert', NULL, NULL);
+}
+
+/**
+ * Implementation of hook_mm_verify_integrity()
+ */
+function monster_menus_mm_verify_integrity() {
+  return array('Monster Menus' => array(
+    t('mm_archive.main_mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_archive} x LEFT JOIN {mm_tree} t ON t.mmtid=x.main_mmtid WHERE t.mmtid IS NULL",
+
+    t('mm_archive.archive_mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_archive} x LEFT JOIN {mm_tree} t ON t.mmtid=x.archive_mmtid WHERE t.mmtid IS NULL",
+
+    t('mm_cascaded_settings.mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_cascaded_settings} x LEFT JOIN {mm_tree} t ON t.mmtid=x.mmtid WHERE t.mmtid IS NULL",
+
+    t('mm_group.gid refers to missing mm_tree.mmtid') =>
+      "{mm_group} x LEFT JOIN {mm_tree} t ON t.mmtid=x.gid WHERE t.mmtid IS NULL AND x.gid>0 AND x.vgid=0",
+    t('mm_group.uid refers to missing users.uid') =>
+      "{mm_group} x LEFT JOIN {users} u ON u.uid=x.uid WHERE u.uid IS NULL AND x.uid>0",
+    t('mm_group.vgid refers to missing mm_vgroup_query.vgid') =>
+      "{mm_group} x LEFT JOIN {mm_vgroup_query} v ON v.vgid=x.vgid WHERE v.vgid IS NULL AND x.vgid>0",
+
+    t('mm_node2tree.mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_node2tree} x LEFT JOIN {mm_tree} t ON t.mmtid=x.mmtid WHERE t.mmtid IS NULL",
+    t('mm_node2tree.nid refers to missing node.nid') =>
+      "{mm_node2tree} x LEFT JOIN {node} n ON n.nid=x.nid WHERE n.nid IS NULL",
+
+    t('mm_node_gallery.nid refers to missing node.nid') =>
+      "{mm_node_gallery} x LEFT JOIN {node} n ON n.nid=x.nid WHERE n.nid IS NULL",
+
+    t('mm_node_gallery_imgs.nid refers to missing node.nid') =>
+      "{mm_node_gallery_imgs} x LEFT JOIN {node} n ON n.nid=x.nid WHERE n.nid IS NULL",
+    t('mm_node_gallery_imgs.img_nid refers to missing node.nid') =>
+      "{mm_node_gallery_imgs} x LEFT JOIN {node} n ON n.nid=x.img_nid WHERE x.img_nid>0 AND n.nid IS NULL",
+    t('mm_node_gallery_imgs.img_mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_node_gallery_imgs} x LEFT JOIN {mm_tree} t ON t.mmtid=x.img_mmtid WHERE x.img_mmtid>0 AND t.mmtid IS NULL",
+
+    t('mm_node_info.nid refers to missing node.nid') =>
+      "{mm_node_info} x LEFT JOIN {node} n ON n.nid=x.nid WHERE n.nid IS NULL",
+
+    t('mm_node_redir.nid refers to missing node.nid') =>
+      "{mm_node_redir} x LEFT JOIN {node} n ON n.nid=x.nid WHERE n.nid IS NULL",
+    t('mm_node_redir.mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_node_redir} x LEFT JOIN {mm_tree} t ON t.mmtid=x.mmtid WHERE x.mmtid>0 AND t.mmtid IS NULL",
+
+    t('mm_node_reorder.mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_node_reorder} x LEFT JOIN {mm_tree} t ON t.mmtid=x.mmtid WHERE t.mmtid IS NULL",
+    t('mm_node_reorder.nid refers to missing node.nid') =>
+      "{mm_node_reorder} x LEFT JOIN {node} n ON n.nid=x.nid WHERE n.nid IS NULL",
+
+    t('mm_node_schedule.nid refers to missing node.nid') =>
+      "{mm_node_schedule} x LEFT JOIN {node} n ON n.nid=x.nid WHERE n.nid IS NULL",
+
+    t('mm_node_subpglist.nid refers to missing node.nid') =>
+      "{mm_node_subpglist} x LEFT JOIN {node} n ON n.nid=x.nid WHERE n.nid IS NULL",
+
+    t('mm_node_write.nid refers to missing node.nid') =>
+      "{mm_node_write} x LEFT JOIN {node} n ON n.nid=x.nid WHERE n.nid IS NULL",
+    t('mm_node_write.gid refers to missing mm_tree.mmtid') =>
+      "{mm_node_write} x LEFT JOIN {mm_tree} t ON t.mmtid=x.gid WHERE x.gid>0 AND t.mmtid IS NULL",
+    t('mm_node_write.gid refers to missing mm_group.gid') =>
+      "{mm_node_write} x LEFT JOIN {mm_group} g ON g.gid=x.gid WHERE x.gid<0 AND g.gid IS NULL",
+
+    t('mm_recycle.id refers to missing mm_tree.mmtid (when type=cat)') =>
+      "{mm_recycle} x LEFT JOIN {mm_tree} t ON t.mmtid=x.id WHERE x.type='cat' AND t.mmtid IS NULL",
+    t('mm_recycle.id refers to missing node.nid (when type=node)') =>
+      "{mm_recycle} x LEFT JOIN {node} n ON n.nid=x.id WHERE x.type='node' AND n.nid IS NULL",
+    t('mm_recycle.from_mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_recycle} x LEFT JOIN {mm_tree} t ON t.mmtid=x.from_mmtid WHERE x.from_mmtid>0 AND t.mmtid IS NULL",
+    t('mm_recycle.bin_mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_recycle} x LEFT JOIN {mm_tree} t ON t.mmtid=x.bin_mmtid WHERE t.mmtid IS NULL",
+
+    t('mm_role2group.rid refers to missing role.rid') =>
+      "{mm_role2group} x LEFT JOIN {role} r ON r.rid=x.rid WHERE r.rid IS NULL",
+    t('mm_role2group.gid refers to missing mm_tree.mmtid') =>
+      "{mm_role2group} x LEFT JOIN {mm_tree} t ON t.mmtid=x.gid WHERE t.mmtid IS NULL",
+
+    t('mm_tree.parent refers to missing mm_tree.mmtid') =>
+      "{mm_tree} x LEFT JOIN {mm_tree} t ON t.mmtid=x.parent WHERE x.parent>0 AND t.mmtid IS NULL",
+    t('mm_tree.uid refers to missing users.uid') =>
+      "{mm_tree} x LEFT JOIN {users} u ON u.uid=x.uid WHERE u.uid IS NULL AND x.uid>0",
+
+    t('mm_tree_access.mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_tree_access} x LEFT JOIN {mm_tree} t ON t.mmtid=x.mmtid WHERE t.mmtid IS NULL",
+    t('mm_tree_access.gid refers to missing mm_tree.mmtid') =>
+      "{mm_tree_access} x LEFT JOIN {mm_tree} t ON t.mmtid=x.gid WHERE x.gid>0 AND t.mmtid IS NULL",
+
+    t('mm_tree_block.mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_tree_block} x LEFT JOIN {mm_tree} t ON t.mmtid=x.mmtid WHERE t.mmtid IS NULL",
+    t('mm_tree_block.bid refers to missing mm_block.bid') =>
+      "{mm_tree_block} x LEFT JOIN {mm_block} b ON b.bid=x.bid WHERE x.bid>0 AND b.bid IS NULL",
+
+    t('mm_tree_bookmarks.uid refers to missing users.uid') =>
+      "{mm_tree_bookmarks} x LEFT JOIN {users} u ON u.uid=x.uid WHERE u.uid IS NULL",
+
+    t('mm_tree_flags.mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_tree_flags} x LEFT JOIN {mm_tree} t ON t.mmtid=x.mmtid WHERE t.mmtid IS NULL",
+
+    t('mm_tree_parents.mmtid refers to missing mm_tree.mmtid') =>
+      "{mm_tree_parents} x LEFT JOIN {mm_tree} t ON t.mmtid=x.mmtid WHERE t.mmtid IS NULL",
+    t('mm_tree_parents.parent refers to missing mm_tree.mmtid') =>
+      "{mm_tree_parents} x LEFT JOIN {mm_tree} t ON t.mmtid=x.parent WHERE x.parent>0 AND t.mmtid IS NULL",
+
+    t('mm_virtual_group.vgid refers to missing mm_vgroup_query.vgid') =>
+      "{mm_virtual_group} x LEFT JOIN {mm_vgroup_query} v ON v.vgid=x.vgid WHERE v.vgid IS NULL",
+    t('mm_virtual_group.uid refers to missing users.uid') =>
+      "{mm_virtual_group} x LEFT JOIN {users} u ON u.uid=x.uid WHERE u.uid IS NULL",
+  ));
+}
+
+function monster_menus_update_6200() {
+  $ret = array();
+  db_add_field($ret, 'mm_tree', 'ctime', array(
+    'type' => 'int'));
+  db_add_field($ret, 'mm_tree', 'cuid', array(
+    'type' => 'int',
+    'unsigned' => TRUE));
+  db_add_field($ret, 'mm_tree', 'mtime', array(
+    'type' => 'int'));
+  db_add_field($ret, 'mm_tree', 'muid', array(
+    'type' => 'int',
+    'unsigned' => TRUE));
+  return $ret;
+}
+
+function monster_menus_update_6201() {
+  $ret = array();
+
+  db_add_field($ret, 'mm_tree', 'node_info', array(
+    'type' => 'int',
+    'size' => 'tiny',
+    'default' => 1));
+  db_create_table($ret, 'mm_node_info', array(
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        ),
+      'show_node_info' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        ),
+      ),
+    'primary key' => array('nid'),
+  ));
+
+  $theme_settings = variable_get('theme_settings', array());
+  $result = db_query('SELECT DISTINCT type FROM {node}');
+  while ($r = db_fetch_object($result)) {
+    $fmt[] = "SELECT '%s' AS `type`, %d AS show_node_info";
+    $vals[] = $r->type;
+    $vals[] = $theme_settings['toggle_node_info_' . $r->type];
+  }
+
+  $result = db_query_temporary(join(' UNION ', $fmt), $vals, 'temp1');
+  db_query('INSERT INTO {mm_node_info} (SELECT n.nid, t.show_node_info FROM {node} n INNER JOIN temp1 t ON n.type=t.type)');
+
+  db_query("UPDATE {node} SET `type`='story' WHERE `type`='page'");
+  node_type_delete('page');
+  node_types_rebuild();
+
+  variable_set('date_format_long', "l, F j, Y, \\a\\t g:ia");
+  variable_set('date_format_long_custom', "l, F j, Y, \\a\\t g:ia");
+  variable_set('date_format_medium', "l, n/j/Y, \\a\\t g:ia");
+  variable_set('date_format_medium_custom', "l, n/j/Y, \\a\\t g:ia");
+  variable_set('date_format_short', 'n/j/Y - g:ia');
+  variable_set('date_format_short_custom', 'n/j/Y - g:ia');
+
+  return $ret;
+}
+
+function monster_menus_update_6202() {
+  $ret = array();
+  db_create_table($ret, 'mm_allow_reorder', array(
+    'fields' => array(
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+        ),
+      'allow_reorder' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '4'
+        )
+      ),
+    'primary key' => array('mmtid'),
+  ));
+  return $ret;
+}
+
+function monster_menus_update_6203() {
+  $ret = array();
+  db_add_field($ret, 'mm_tree', 'previews', array(
+    'type' => 'int',
+    'size' => 'tiny',
+    'default' => 0));
+  return $ret;
+}
+
+function monster_menus_update_6204() {
+  $ret = array();
+  db_change_field($ret, 'mm_tree_access', 'mode', 'mode', array(
+    'type' => 'varchar',
+    'length' => 1,
+    'not null' => TRUE));
+  db_change_field($ret, 'mm_node_gallery', 'mode', 'mode', array(
+    'type' => 'varchar',
+    'length' => 6,
+    'not null' => TRUE));
+  db_change_field($ret, 'mm_node_gallery', 'single_start', 'single_start', array(
+    'type' => 'varchar',
+    'length' => 6,
+    'not null' => TRUE));
+  db_change_field($ret, 'mm_recycle', 'type', 'type', array(
+    'type' => 'varchar',
+    'length' => 4,
+    'not null' => TRUE));
+  db_change_field($ret, 'mm_tree', 'default_mode', 'default_mode', array(
+    'type' => 'varchar',
+    'length' => 7,
+    'not null' => FALSE));
+  return $ret;
+}
+
+function monster_menus_update_6205() {
+  $ret = array();
+  db_create_table($ret, 'mm_node_reorder', array(
+    'fields' => array(
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'weight' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'primary key' => array('mmtid', 'nid'),
+  ));
+  return $ret;
+}
+
+function monster_menus_update_6206() {
+  $ret = array();
+  db_create_table($ret, 'mm_node_schedule', array(
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'publish_on' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'unpublish_on' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'set_change_date' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'default' => 0,
+      )
+    ),
+    'primary key' => array('nid'),
+  ));
+  return $ret;
+}
+
+function monster_menus_update_6207() {
+  db_query("UPDATE {mm_tree} SET theme='' WHERE theme IN('CollegeRowFall', 'Geology', 'IT', 'MuseumNaturalHistory', 'Octagon', 'Philosophy', 'QuadRange')");
+  db_query("DELETE FROM {mm_allowed_theme} WHERE name IN('CollegeRowFall', 'Geology', 'IT', 'MuseumNaturalHistory', 'Octagon', 'Philosophy', 'QuadRange')");
+  return array();
+}
+
+function monster_menus_update_6208() {
+  $ret = array();
+  db_add_field($ret, 'mm_block', 'admin_only', array(
+    'type' => 'varchar',
+    'length' => '1',
+    'not null' => TRUE));
+  return $ret;
+}
+
+function monster_menus_update_6209() {
+  $ret = array();
+  db_create_table($ret, 'mm_archive', array(
+    'fields' => array(
+      'main_mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'archive_mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'frequency' => array(
+        'type' => 'varchar',
+        'length' => '5',
+        'not null' => TRUE,
+      ),
+      'main_nodes' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '10',
+      ),
+    ),
+    'primary key' => array('main_mmtid'),
+    'indexes' => array(
+      'archive_mmtid' => array('archive_mmtid'),
+    ),
+  ));
+  return $ret;
+}
+
+function monster_menus_update_6400() {
+  $ret = array();
+  db_change_field($ret, 'mm_vgroup_query', 'vgid', 'vgid', array(
+    'type' => 'serial',
+    'unsigned' => TRUE,
+    'not null' => TRUE
+  ));
+  return $ret;
+}
+
+function monster_menus_update_6401() {
+  $ret = array();
+  db_add_field($ret, 'mm_tree', 'hidden', array(
+    'type' => 'int',
+    'size' => 'tiny',
+    'not null' => FALSE,
+    'default' => 0,
+    'disp-width' => '4'
+  ));
+  // applicants' home dirs are now hidden via mm_tree, but we also want to set
+  // the menu to "restart"
+  db_query('UPDATE {eduprofile} e INNER JOIN {mm_tree} t ON t.mmtid = e.user_mmtid INNER JOIN {mm_tree_block} b ON b.bid = 0 AND b.mmtid = t.mmtid SET t.hidden = 1, b.bid = 1 WHERE e.isapplicant = 1');
+  // update all other hidden cats
+  db_query('UPDATE {mm_tree} t INNER JOIN {mm_tree_block} b ON b.mmtid = t.mmtid SET hidden = 1 WHERE bid = 0');
+  // remove hidden attribute from mm_tree_block entries used for other purposes
+  db_query('UPDATE {mm_tree_block} SET bid = -1 WHERE bid = 0 AND (max_depth <> -1 OR max_parents <> -1)');
+  // remove mm_tree_block entries that are ONLY for the hidden attribute
+  db_query('DELETE FROM {mm_tree_block} WHERE bid = 0');
+  return $ret;
+}
+
+function monster_menus_update_6402() {
+  $ret = array();
+  db_add_field($ret, 'mm_tree', 'comment', array(
+    'type' => 'int',
+    'size' => 'tiny',
+    'not null' => FALSE,
+    'default' => 0,
+    'disp-width' => '4'
+  ));
+  return $ret;
+}
+
+function monster_menus_update_6403() {
+  if (variable_get('mm_show_permalink', FALSE) && variable_get('mm_show_node_permalink', 99) === 99) {
+    variable_set('mm_show_node_permalink', TRUE);
+  }
+  variable_del('mm_show_permalink');
+
+  if (variable_get('mm_enable_add_page_to_portal', FALSE) && variable_get('mm_show_add_tag_to_portal', 99) === 99) {
+    variable_set('mm_show_add_tag_to_portal', TRUE);
+  }
+  return array();
+}
+
+function monster_menus_update_6404() {
+  $ret = array();
+  db_create_table($ret, 'mm_cascaded_settings', array(
+    'fields' => array(
+      'id' => array(
+        'type' => 'serial',
+        'size' => 'big',
+        'not null' => TRUE,
+        'disp-width' => '20',
+      ),
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'type' => array(
+        'type' => 'varchar',
+        'length' => '32',
+        'not null' => TRUE,
+      ),
+      'data_type' => array(
+        'type' => 'varchar',
+        'length' => '10',
+        'not null' => TRUE,
+      ),
+      'data' => array(
+        'type' => 'varchar',
+        'length' => '512',
+        'not null' => FALSE,
+      ),
+    ),
+    'primary key' => array('id'),
+    'indexes' => array(
+      'mmtid' => array('mmtid'),
+      'type' => array('type'),
+      'data' => array('data')
+    ),
+  ));
+
+  // housekeeping
+  db_query("DELETE a FROM {mm_allowed_node} a LEFT JOIN {mm_tree} t ON a.mmtid = t.mmtid WHERE t.mmtid IS NULL");
+  db_query("DELETE a FROM {mm_allowed_theme} a LEFT JOIN {mm_tree} t ON a.mmtid = t.mmtid WHERE t.mmtid IS NULL");
+  // this last one is important, due to a bug which prevented any data from
+  // being deleted along with the mmtid
+  db_query("DELETE a FROM {mm_allow_reorder} a LEFT JOIN {mm_tree} t ON a.mmtid = t.mmtid WHERE t.mmtid IS NULL");
+
+  db_query("INSERT INTO {mm_cascaded_settings} (mmtid, type, data_type, data) SELECT mmtid, '%s', '%s', type FROM {mm_allowed_node}", 'allowed_node_types', 'array');
+  db_query("INSERT INTO {mm_cascaded_settings} (mmtid, type, data_type, data) SELECT mmtid, '%s', '%s', name FROM {mm_allowed_theme}", 'allowed_theme', 'array');
+  db_query("INSERT INTO {mm_cascaded_settings} (mmtid, type, data_type, data) SELECT mmtid, '%s', '%s', allow_reorder FROM {mm_allow_reorder}", 'allow_reorder', 'int');
+
+  db_drop_table($ret, 'mm_allowed_node');
+  db_drop_table($ret, 'mm_allowed_theme');
+  db_drop_table($ret, 'mm_allow_reorder');
+  return $ret;
+}
+
+function monster_menus_update_6405() {
+  $ret = array();
+  db_add_field($ret, 'mm_cascaded_settings', 'multiple', array(
+    'type' => 'int',
+    'size' => 'tiny',
+    'not null' => TRUE,
+    'default' => 0,
+  ));
+  db_query("UPDATE {mm_cascaded_settings} SET multiple = IF(data_type = 'array', 1, 0)");
+  db_query("UPDATE {mm_cascaded_settings} SET data_type = 'string' WHERE data_type = 'array'");
+  db_drop_index($ret, 'mm_cascaded_settings', 'type');
+  db_change_field($ret, 'mm_cascaded_settings', 'type', 'name', array(
+    'type' => 'varchar',
+    'length' => '32',
+    'not null' => TRUE,
+  ), array('indexes' => array('name' => array('name'))));
+  db_add_field($ret, 'mm_cascaded_settings', 'array_key', array(
+    'type' => 'varchar',
+    'length' => '32',
+    'not null' => TRUE,
+  ), array('indexes' => array('array_key' => array('array_key'))));
+  return $ret;
+}
+
+function monster_menus_update_6406() {
+  $ret = array();
+  db_add_index($ret, 'mm_tree_block', 'bid', array('bid'));
+  db_add_index($ret, 'mm_tree_block', 'mmtid', array('mmtid'));
+  db_add_index($ret, 'mm_tree_access', 'gid', array('gid'));
+  db_add_index($ret, 'mm_tree_access', 'mmtid', array('mmtid'));
+  db_add_index($ret, 'mm_tree_access', 'mode', array('mode'));
+  db_add_index($ret, 'mm_virtual_group', 'vgid', array('vgid'));
+  db_add_index($ret, 'mm_virtual_group', 'uid', array('uid'));
+  db_add_index($ret, 'mm_node_subpglist', 'vid', array('vid'));
+  db_add_index($ret, 'mm_recycle', 'id', array('id'));
+  db_add_index($ret, 'mm_recycle', 'type', array('type'));
+  db_add_index($ret, 'mm_node_gallery', 'vid', array('vid'));
+  db_add_index($ret, 'mm_group', 'gid', array('gid'));
+  db_add_index($ret, 'mm_group', 'uid', array('uid'));
+  db_add_index($ret, 'mm_node2tree', 'nid', array('nid'));
+  db_add_index($ret, 'mm_node2tree', 'mmtid', array('mmtid'));
+  return $ret;
+}
+
+function monster_menus_update_6407() {
+  db_query("UPDATE {mm_cascaded_settings} SET name = 'allowed_themes' WHERE name = 'allowed_theme'");
+}
+
+function monster_menus_update_6408() {
+  $ret = array();
+  db_add_field($ret, 'mm_node_info', 'comments_readable', array(
+    'type' => 'varchar',
+    'length' => '128',
+    'default' => ''
+  ));
+  return $ret;
+}
+
+function monster_menus_update_6409() {
+  $ret = array();
+  db_add_field($ret, 'mm_node_subpglist', 'depth', array(
+    'type' => 'int',
+    'size' => 'tiny',
+    'not null' => TRUE,
+    'disp-width' => '4'));
+  db_add_field($ret, 'mm_node_subpglist', 'section_prefix', array(
+    'type' => 'varchar',
+    'length' => '255',
+    'not null' => TRUE));
+  db_add_field($ret, 'mm_node_subpglist', 'title_prefix', array(
+    'type' => 'varchar',
+    'length' => '255',
+    'not null' => TRUE));
+  db_add_field($ret, 'mm_node_subpglist', 'title_suffix', array(
+    'type' => 'varchar',
+    'length' => '255',
+    'not null' => TRUE));
+  db_add_field($ret, 'mm_node_subpglist', 'section_suffix', array(
+    'type' => 'varchar',
+    'length' => '255',
+    'not null' => TRUE));
+  db_query("UPDATE {mm_node_subpglist} SET depth = 1");
+  db_query("UPDATE {mm_node_subpglist} SET section_prefix = '<ul>', section_suffix = '</ul>' WHERE column_prefix = '<td><ul>' AND row_prefix = '<li>'");
+  return $ret;
+}
+
+function monster_menus_update_6410() {
+  // This update hook is reserved. It previously contained an update that has
+  // since been moved to the mm_share_widget module.
+  return array();
+}
+
+function monster_menus_update_6500() {
+  $ret = array();
+  db_create_table($ret, 'mm_tree_flags', array(
+    'fields' => array(
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'flag' => array(
+        'type' => 'varchar',
+        'length' => '64',
+        'not null' => TRUE,
+      ),
+      'data' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => FALSE,
+      ),
+    ),
+    'primary key' => array('mmtid', 'flag'),
+    'indexes' => array(
+      'data' => array('data'),
+      'flag' => array('flag'),
+    ),
+  ));
+
+  $xref = array('Instructors' => 'vgrp_class_instr', 'Students' => 'vgrp_class_stu', 'TAs' => 'vgrp_class_ta');
+  $q = db_query("SELECT mmtid, flags, name FROM {mm_tree} WHERE flags IS NOT NULL AND flags <> ''");
+  while ($r = db_fetch_object($q))
+    foreach (explode(',', $r->flags) as $flag) {
+      $data = '';
+      if (substr($flag, 5, 5) == '_vgrp') {
+        if (preg_match('/^(\w+)-(.*?)-(?:(.*?)-)?\d{4}[FS]\s+(All)?\s*(.*)$/', $r->name, $matches)) {
+          db_query("INSERT INTO {mm_tree_flags} (mmtid, flag, data) VALUES(%d, '%s', '%s')", $r->mmtid, 'vgrp_class_subj', $matches[1]);
+          db_query("INSERT INTO {mm_tree_flags} (mmtid, flag, data) VALUES(%d, '%s', '%s')", $r->mmtid, 'vgrp_class_num', $matches[2]);
+          if (!empty($matches[3])) db_query("INSERT INTO {mm_tree_flags} (mmtid, flag, data) VALUES(%d, '%s', '%s')", $r->mmtid, 'vgrp_class_sec', $matches[3]);
+          if (!empty($matches[4])) db_query("INSERT INTO {mm_tree_flags} (mmtid, flag, data) VALUES(%d, '%s', '%s')", $r->mmtid, 'vgrp_class_all', '');
+          db_query("INSERT INTO {mm_tree_flags} (mmtid, flag, data) VALUES(%d, '%s', '%s')", $r->mmtid, $xref[$matches[5]], '');
+        }
+        $data = substr($flag, 0, 5);
+        $flag = 'vgrp_class_term';
+      }
+      else if (substr($flag, 0, 6) == 'class_') {
+        $data = substr($flag, 6, 4);
+        $flag = substr($flag, 10) == '_news' ? 'class_news' : 'class_site';
+      }
+      else if (substr($flag, 0, 9) == 'interest_') {
+        $data = substr($flag, 9);
+        $flag = 'interest';
+      }
+
+      db_query("INSERT INTO {mm_tree_flags} (mmtid, flag, data) VALUES(%d, '%s', '%s')", $r->mmtid, $flag, $data);
+    }
+
+  if (module_exists('amherstprofile')) {
+    $ret[] = update_sql("INSERT INTO {mm_tree_flags} (mmtid, flag, data) SELECT e.user_mmtid, '%s', e.uid FROM {eduprofile} e INNER JOIN {mm_tree} t ON t.mmtid = e.user_mmtid WHERE e.user_mmtid IS NOT NULL", 'user_home');
+  }
+  else {
+    $ret[] = update_sql("INSERT INTO {mm_tree_flags} (mmtid, flag, data) SELECT t.mmtid, '%s', t.uid FROM {mm_tree} t INNER JOIN {users} u ON u.uid = t.uid WHERE t.parent = %d AND t.uid <> %d AND LEFT(t.name, 1) <> '.' GROUP BY t.uid", 'user_home', 4, 1);
+  }
+
+  db_drop_field($ret, 'mm_tree', 'flags');
+
+  $updates = array();
+  $q = db_query("SELECT g.gid FROM {mm_vgroup_query} v INNER JOIN {mm_group} g ON g.vgid = v.vgid WHERE v.qfrom LIKE '%flags%'");
+  while ($r = db_fetch_object($q))
+    $updates[] = l($r->gid, "mm/$r->gid/settings");
+
+  if ($updates) {
+    drupal_set_message(t('These virtual groups may need to be updated: ') . join(', ', $updates), 'warning');
+  }
+
+  if (module_exists('rss_page')) {
+    $updates = array();
+    $q = db_query("SELECT DISTINCT f.nid FROM {rss_page} p INNER JOIN {rss_page_feed} f ON f.nid = p.nid WHERE f.data LIKE '%s' OR p.`condition` LIKE '%s'", '%flags%', '%flags%');
+    while ($r = db_fetch_object($q))
+      $updates[] = l($r->nid, "node/$r->nid/edit");
+    if ($updates) {
+      drupal_set_message(t('These RSS Page nodes may need to be updated: ') . join(', ', $updates), 'warning');
+    }
+  }
+
+  return $ret;
+}
+
+function monster_menus_update_6501() {
+  $ret = array();
+  db_create_table($ret, 'mm_tree_parents', array(
+    'fields' => array(
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'parent' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'depth' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'size' => 'small',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('mmtid', 'parent'),
+    'indexes' => array(
+      'depth' => array('depth'),
+      'mmtid' => array('mmtid'),
+      'parent' => array('parent'),
+    ),
+  ));
+
+  db_query('INSERT INTO {mm_tree_parents} (mmtid, parent, depth) VALUES(%d, %d, %d)', 1, 0, 0);
+  $result = db_query('SELECT * FROM {mm_tree} WHERE mmtid > 1');
+  while ($r = db_fetch_object($result)) {
+    $parents = empty($r->parents) ? array() : split(',', $r->parents);
+    $parents[] = $r->parent;
+    foreach ($parents as $depth => $parent)
+      db_query('INSERT INTO {mm_tree_parents} (mmtid, parent, depth) VALUES(%d, %d, %d)', $r->mmtid, $parent, $depth);
+  }
+
+  db_add_field($ret, 'mm_tree', 'sort_idx', array(
+    'type' => 'varchar',
+    'length' => min(intval(255 / MM_CONTENT_BTOA_CHARS), MM_CONTENT_MYSQL_MAX_JOINS) * MM_CONTENT_BTOA_CHARS,
+    'not null' => TRUE,
+  ));
+  db_add_field($ret, 'mm_tree', 'sort_idx_dirty', array(
+    'type' => 'int',
+    'size' => 'tiny',
+    'not null' => TRUE,
+  ));
+  db_add_index($ret, 'mm_tree', 'sort_idx', array('sort_idx'));
+  db_add_index($ret, 'mm_tree', 'sort_idx_dirty', array('sort_idx_dirty'));
+  db_drop_field($ret, 'mm_tree', 'parents');
+  db_drop_table($ret, 'mm_read_perm');
+
+  variable_del('mm_content_users_tid');
+  variable_del('mm_content_groups_tid');
+  variable_del('amherstprofile_inactive_display_name');
+  cache_clear_all('mm_virtual', 'cache', TRUE);
+  mm_content_update_sort();
+
+  return $ret;
+}
+
+function monster_menus_update_6502() {
+  $ret = array();
+  db_create_table($ret, 'mm_tree_revisions', array(
+    'fields' => array(
+      'mmtid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'vid' => array(
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'name' => array(
+        'type' => 'varchar',
+        'length' => '128',
+        'not null' => TRUE
+      ),
+      'alias' => array(
+        'type' => 'varchar',
+        'length' => '128',
+        'not null' => FALSE
+      ),
+      'parent' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11'
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => FALSE,
+        'disp-width' => '11'
+      ),
+      'default_mode' => array(
+        'type' => 'varchar',
+        'length' => 7,
+        'not null' => FALSE
+      ),
+      'theme' => array(
+        'type' => 'varchar',
+        'length' => '255',
+        'not null' => FALSE
+      ),
+      'hover' => array(
+        'type' => 'varchar',
+        'length' => '128',
+        'not null' => FALSE
+      ),
+      'rss' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+        'disp-width' => '3'
+      ),
+      'mtime' => array(
+        'type' => 'int',
+        'not null' => FALSE,
+        'disp-width' => '11'
+      ),
+      'muid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => FALSE,
+        'disp-width' => '10'
+      ),
+      'node_info' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'default' => 1,
+        'disp-width' => '4'
+      ),
+      'previews' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'default' => 0,
+        'disp-width' => '4'
+      ),
+      'hidden' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'default' => 0,
+        'disp-width' => '4'
+      ),
+      'comment' => array(
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => FALSE,
+        'default' => 0,
+        'disp-width' => '4'
+      ),
+    ),
+    'primary key' => array('vid'),
+    'indexes' => array(
+      'mmtid' => array('mmtid'),
+      'alias' => array('alias'),
+      'parent' => array('parent'),
+    )
+  ));
+
+  db_add_field($ret, 'mm_tree', 'vid', array(
+    'type' => 'int',
+    'unsigned' => TRUE,
+    'not null' => TRUE,
+    'disp-width' => '11'
+  ));
+  db_add_index($ret, 'mm_tree', 'vid', array('vid'));
+  $ret[] = update_sql('INSERT INTO {mm_tree_revisions} (mmtid, name, alias, parent, uid, default_mode, theme, hover, rss, mtime, muid, node_info, previews, hidden, comment) SELECT mmtid, name, alias, parent, uid, default_mode, theme, hover, rss, mtime, muid, node_info, previews, hidden, comment FROM {mm_tree}');
+  $ret[] = update_sql('UPDATE {mm_tree} t INNER JOIN {mm_tree_revisions} r ON r.mmtid = t.mmtid SET t.vid = r.vid');
+  db_drop_field($ret, 'mm_tree', 'mtime');
+  db_drop_field($ret, 'mm_tree', 'muid');
+
+  if (variable_get('mm_enable_add_page_to_portal', FALSE)) {
+    variable_set('mm_enable_rss', TRUE);
+  }
+  variable_del('mm_enable_add_page_to_portal');
+
+  $site_404 = variable_get('site_404', '');
+  if (!empty($site_404)) {
+    drupal_set_message(t('In order to enable automatic suggestions when bad URLs are encountered, you should add the following PHP code to your site\'s 404 (not found) page, at %url:<br />@php', array('%url' => $site_404, '@php' => '<?php print mm_get_detailed_404(); ?>')));
+  }
+
+  return $ret;
+}
+
+function monster_menus_update_6503() {
+  variable_del('mm_403_logged_in');
+  variable_del('mm_403_anon');
+  return array();
+}
+
+function monster_menus_update_6504() {
+  $ret = array();
+  $ret[] = update_sql("DELETE FROM {mm_tree_flags} WHERE flag = 'user_home'");
+  if (module_exists('amherstprofile')) {
+    $ret[] = update_sql("INSERT INTO {mm_tree_flags} (mmtid, flag, data) SELECT e.user_mmtid, 'user_home', e.uid FROM {eduprofile} e INNER JOIN {mm_tree} t ON t.mmtid = e.user_mmtid WHERE e.user_mmtid IS NOT NULL");
+  }
+  else {
+    $ret[] = update_sql("INSERT INTO {mm_tree_flags} (mmtid, flag, data) SELECT t.mmtid, 'user_home', t.uid FROM {mm_tree} t INNER JOIN {users} u ON u.uid = t.uid WHERE t.parent = 4 AND t.uid <> 1 AND LEFT(t.name, 1) <> '.' GROUP BY t.uid");
+  }
+  return $ret;
+}
+
+function monster_menus_update_6505() {
+  $ret = array();
+  db_create_table($ret, 'mm_tree_bookmarks', array(
+    'fields' => array(
+      'bmid' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'type' => array(
+        'type' => 'varchar',
+        'length' => '20',
+        'not null' => TRUE,
+      ),
+      'weight' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'data' => array(
+        'type' => 'text',
+        'size' => 'big',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('bmid'),
+  ));
+  return $ret;
+}
+
+function monster_menus_update_6506() {
+  $ret = array();
+  db_create_table($ret, 'mm_group_temp', array(
+    'fields' => array(
+      'gid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'sessionid' => array(
+        'type' => 'varchar',
+        'length' => '64',
+        'default' => ''
+      ),
+    ),
+    'primary key' => array('gid', 'uid', 'sessionid'),
+    'indexes' => array(
+      'sessionid' => array('sessionid'),
+      'gid' => array('gid'),
+      'uid' => array('uid'),
+    ),
+  ));
+  return $ret;
+}
+
+function monster_menus_update_6507() {
+  $ret = array();
+  // Query for limit_write flag, but exclude MM items with both the
+  // limit_write and limit_alias flags because we have likely already
+  // touched those elements.
+  $result = db_query("SELECT m.mmtid FROM {mm_tree_flags} m WHERE m.flag = 'limit_write' AND m.mmtid NOT IN (SELECT f.mmtid FROM {mm_tree_flags} f WHERE f.flag = 'limit_alias')");
+
+  $new_flags = array('limit_alias', 'limit_copymove', 'limit_delete', 'limit_hidden', 'limit_location', 'limit_name');
+  while ($row = db_fetch_object($result)) {
+    $query = "INSERT INTO {mm_tree_flags} (mmtid, flag, data) VALUES ";
+    foreach ($new_flags as $new_flag) {
+      $query .= "({$row->mmtid}, '{$new_flag}', ''), ";
+    }
+    $query = substr($query, 0, -2);
+    $outcome = db_query($query);
+    $ret[] = array('success' => $outcome !== FALSE, 'query' => $query);
+  }
+  return $ret;
+}
+
+function monster_menus_update_6508() {
+  $ret = array();
+  $result = db_query("UPDATE {mm_tree_flags} SET flag = 'limit_move' WHERE flag = 'limit_copymove'");
+  $ret[] = array('success' => $outcome !== FALSE, 'query' => $query);
+  return $ret;
+}
+
+function monster_menus_update_6509() {
+  $ret = array();
+  db_change_field($ret, 'mm_tree', 'sort_idx', 'sort_idx', array(
+    'type' => 'varchar',
+    'length' => min(intval(255 / MM_CONTENT_BTOA_CHARS), MM_CONTENT_MYSQL_MAX_JOINS) * MM_CONTENT_BTOA_CHARS,
+    'not null' => TRUE,
+  ));
+  return $ret;
+}
+
+function monster_menus_update_6510() {
+  $ret = array();
+  $groups_mmtid = variable_get('mm_content_groups_mmtid', 2);
+  $ret[] = update_sql("UPDATE {mm_tree} t INNER JOIN {mm_tree_parents} p ON p.mmtid = t.mmtid SET t.default_mode = IF(LENGTH(t.default_mode), CONCAT(t.default_mode, ',u'), 'u') WHERE p.parent = $groups_mmtid AND LOCATE('u', t.default_mode) = 0");
+  return $ret;
+}

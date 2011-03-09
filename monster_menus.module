@@ -1,0 +1,1331 @@
+<?php
+// $Id: monster_menus.module 5016 2011-02-09 20:01:14Z dan $
+
+/**
+ * @file
+ * Menus, menus, menus
+ */
+
+define('MM_COMMENT_READABILITY_DEFAULT', 'comment readability default');  // permission name
+define('MM_NODE_INFO_NO_REORDER',        'no_reorder'); // don't allow this node type to be reordered
+
+require_once 'mm_content.inc';
+require_once 'mm_menu.inc';
+require_once 'misc.inc';
+require_once 'mm_ui.inc';
+require_once 'mm_node.inc';
+require_once 'mm_static.inc';
+require_once 'mm_query.inc';
+require_once 'mm_dependencies.inc';
+
+global $_mm_reserved_alias_defaults, $_mm_mmtid_of_node, $_mm_page_args;
+$_mm_reserved_alias_defaults = array('feed');
+
+/**
+ * Implementation of hook_help().
+ */
+function monster_menus_help($path, $arg) {
+  switch ($path) {
+    case 'admin/modules#description':
+      return t('Provides a menu system with granular node access.');
+
+    case 'admin/help#monster_menus':
+      return t('<p></p>');
+
+    case 'mm/%/contents/add':
+      $temp_arg = array('node', 'add');
+      if ($arg[4]) {
+        $temp_arg[] = $arg[4];
+      }
+      break;
+  }
+
+  foreach (mm_node_types() as $type) {
+    if ('node/add#' . $type['name'] == $path) {
+      return $type['description'];
+    }
+  }
+
+  if ($arg[0] == 'mm' && $arg[2] == 'node') {
+    $temp_arg = array_splice($arg, 2);
+    $temp_path = drupal_substr($path, drupal_strlen('mm/%/'));
+  }
+
+  if (isset($temp_arg)) {
+    if (!isset($temp_path)) $temp_path = join('/', $temp_arg);
+    foreach (module_list() as $name) {
+      if (module_hook($name, 'help')) {
+        // Lookup help for this path.
+        if ($help = module_invoke($name, 'help', $temp_path, $temp_arg)) {
+          $output .= $help ."\n";
+        }
+      }
+    }
+    return $output;
+  }
+}
+
+/**
+ * Implementation of hook_node_info().
+ */
+function monster_menus_node_info() {
+  return mm_node_types();
+}
+
+/**
+ * Implementation of hook_perm().
+ */
+function monster_menus_perm() {
+  $perms = array(
+    'administer all groups',
+    'administer all menus',
+    'administer all users',
+    'create archives',
+    'enable/disable comments',
+    'propagate node perms',
+    'propagate page perms',
+    'see create/modify times',
+    'show/hide post information',
+    'use permissions solver',
+    'use search/replace',
+    'use tree browser',
+    'view all menus',
+  );
+
+  foreach (mm_node_types() as $type) {
+    $perms = array_merge($perms, $type['perms']);
+  }
+
+  if (variable_get('mm_finegrain_comment_readability', FALSE)) {
+    $perms[] = MM_COMMENT_READABILITY_DEFAULT;
+    foreach (variable_get('mm_comments_readable_labels', array()) as $label)
+      $perms[] = $label['perm'];
+  }
+
+  return $perms;
+}
+
+/**
+ * Implementation of hook_menu().
+ */
+function monster_menus_menu() {
+  $items = array();
+  foreach (mm_node_types() as $type) {
+    $items = array_merge($items, $type['menus']);
+  }
+
+  module_load_include('inc', 'monster_menus', 'mm_admin');
+  $items = array_merge($items, mm_admin_menu());
+  module_load_include('inc', 'monster_menus', 'mm_browser');
+  $items = array_merge($items, mm_browser_menu());
+
+  $items['mm-auto'] = array(
+    'title' => '',
+    'page callback' => 'mm_autocomplete',
+    'page arguments' => array(FALSE),
+    'access callback' => 'user_access',
+    'access arguments' => array('access user profiles'),
+    'type' => MENU_CALLBACK);
+  $items['mm-txtimg'] = array(
+    'title' => '',
+    'page callback' => 'mm_text2image_img',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK);
+  $items['mmsr-get'] = array(
+    'title' => '',
+    'file' => 'mm_search_replace.inc',
+    'page callback' => 'mm_search_result_count',
+    'access callback' => 'user_access',
+    'access arguments' => array('use search/replace'),
+    'type' => MENU_CALLBACK);
+  $items['.mm-sitemap'] = array(
+    'title' => 'Generate sitemap.xml',
+    'file' => 'mm_sitemap.inc',
+    'page callback' => 'mm_sitemap',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK);
+  $items['sitemap.xml'] = array(
+    'title' => 'View sitemap.xml',
+    'file' => 'mm_sitemap.inc',
+    'page callback' => 'mm_sitemap_show',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK);
+
+  // Menu entries to display a page
+  $items['mm'] = array(
+    'title' => 'Home',
+    'page callback' => 'mm_show_page',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK);
+  $items['mm/%mm_mmtid'] = array(
+    'title' => 'View',
+    'page_callback' => 'mm_show_page',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK);
+  $items['mm/%mm_mmtid/viewall'] = array(
+    'title' => 'View All Users',
+    'page callback' => 'mm_show_group',
+    'page arguments' => array(1),
+    'access callback' => '_mm_menu_access_group_viewall',
+    'access arguments' => array(1),
+    'type' => MENU_CALLBACK);
+
+  // Local tasks -- Contents tab
+  $items['mm/%mm_mmtid/contents'] = array(
+    'title' => 'Contents',
+    'access callback' => TRUE,
+    'weight' => 1,
+    'type' => MENU_DEFAULT_LOCAL_TASK);
+  $items['mm/%mm_mmtid/contents/add'] = array(
+    'title' => 'Add',
+    'page callback' => 'mm_ui_node_add',
+    'page arguments' => array(1, 4),
+    'access callback' => '_mm_menu_access_add',
+    'access arguments' => array(1),
+    'weight' => 2,
+    'type' => MENU_LOCAL_TASK);
+  $items['mm/%mm_mmtid/contents/view'] = array(
+    'title' => 'View',
+    'weight' => 1,
+    'type' => MENU_DEFAULT_LOCAL_TASK);
+  $items['mm/%mm_mmtid/contents/reorder'] = array(
+    'title' => 'Reorder',
+    'file' => 'mm_ui_node_reorder.inc',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('mm_ui_node_reorder', 1),
+    'access callback' => '_mm_menu_access_node_reorder',
+    'access arguments' => array(1),
+    'weight' => 3,
+    'type' => MENU_LOCAL_TASK);
+  // Local tasks -- Settings tab
+  $items['mm/%mm_mmtid/settings'] = array(
+    'title' => 'Settings',
+    'file' => 'mm_ui_content.inc',
+    'page callback' => 'mm_ui_content',
+    'page arguments' => array(1),
+    'access callback' => '_mm_menu_access_settings_tab',
+    'access arguments' => array(1),
+    'weight' => 2,
+    'type' => MENU_LOCAL_TASK);
+  $items['mm/%mm_mmtid/settings/empty'] = array(
+    'title' => 'Empty recycle bin',
+    'file' => 'mm_ui_content.inc',
+    'page callback' => 'mm_ui_content',
+    'page arguments' => array(1, 'empty'),
+    'access callback' => '_mm_menu_access_empty_bin',
+    'access arguments' => array(1),
+    'weight' => 2,
+    'type' => MENU_LOCAL_TASK);
+  $items['mm/%mm_mmtid/settings/edit'] = array(
+    'title' => 'Edit',
+    'file' => 'mm_ui_content.inc',
+    'page callback' => 'mm_ui_content',
+    'page arguments' => array(1, 'edit'),
+    'access callback' => '_mm_menu_access_edit',
+    'access arguments' => array(1),
+    'weight' => 1,
+    'type' => MENU_DEFAULT_LOCAL_TASK);
+  $items['mm/%mm_mmtid/settings/copymove'] = array(
+    'title' => 'Copy/Move',
+    'file' => 'mm_ui_content.inc',
+    'page callback' => 'mm_ui_content',
+    'page arguments' => array(1, 'copymove'),
+    'access callback' => '_mm_menu_access_copy',
+    'access arguments' => array(1),
+    'weight' => 2,
+    'type' => MENU_LOCAL_TASK);
+  $items['mm/%mm_mmtid/settings/restore'] = array(
+    'title' => 'Restore',
+    'file' => 'mm_ui_content.inc',
+    'page callback' => 'mm_ui_content',
+    'page arguments' => array(1, 'restore'),
+    'access callback' => '_mm_menu_access_restore',
+    'access arguments' => array(1),
+    'weight' => 3,
+    'type' => MENU_LOCAL_TASK);
+  $items['mm/%mm_mmtid/settings/delete'] = array(
+    'title callback' => '_mm_menu_title_settings_delete',
+    'title arguments' => array(1),
+    'file' => 'mm_ui_content.inc',
+    'page callback' => 'mm_ui_content',
+    'page arguments' => array(1, 'delete'),
+    'access callback' => '_mm_menu_access_delete',
+    'access arguments' => array(1),
+    'weight' => 4,
+    'type' => MENU_LOCAL_TASK);
+  $items['mm/%mm_mmtid/settings/sub'] = array(
+    'title callback' => '_mm_menu_title_settings_sub',
+    'title arguments' => array(1),
+    'file' => 'mm_ui_content.inc',
+    'page callback' => 'mm_ui_content',
+    'page arguments' => array(1, 'sub'),
+    'access callback' => '_mm_menu_access_sub',
+    'access arguments' => array(1),
+    'weight' => 5,
+    'type' => MENU_LOCAL_TASK);
+  $items['mm/%mm_mmtid/settings/reorder'] = array(
+    'title' => 'Reorder menu',
+    'file' => 'mm_ui_menu_reorder.inc',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('mm_ui_menu_reorder', 1),
+    'access callback' => '_mm_menu_access_menu_reorder',
+    'access arguments' => array(1),
+    'weight' => 6,
+    'type' => MENU_LOCAL_TASK);
+  $items['mm/%mm_mmtid/settings/search'] = array(
+    'title' => 'Search', // eventually Search/Replace
+    'file' => 'mm_ui_content.inc',
+    'page callback' => 'mm_ui_content',
+    'page arguments' => array(1, 'search'),
+    'access callback' => 'user_access',
+    'access arguments' => array('use search/replace'),
+    'weight' => 7,
+    'type' => MENU_LOCAL_TASK);
+  $items['mm/%mm_mmtid/settings/search/result'] = array(
+    'title' => 'Search', // eventually Search/Replace
+    'file' => 'mm_ui_content.inc',
+    'page callback' => 'mm_ui_content',
+    'page arguments' => array(1, 'search result'),
+    'access callback' => 'user_access',
+    'access arguments' => array('use search/replace'),
+    'type' => MENU_CALLBACK);
+  $items['mm/%mm_mmtid/settings/search/result.csv'] = array(
+    'title' => 'Search', // eventually Search/Replace
+    'file' => 'mm_ui_content.inc',
+    'page callback' => 'mm_ui_content',
+    'page arguments' => array(1, 'search result csv'),
+    'access callback' => 'user_access',
+    'access arguments' => array('use search/replace'),
+    'type' => MENU_CALLBACK);
+  $items['mm/%mm_mmtid/settings/solver'] = array(
+    'title' => 'Solve Permissions Issues',
+    'file' => 'mm_ui_solver.inc',
+    'page callback' => 'mm_ui_solver',
+    'page arguments' => array(1, 4),
+    'access callback' => '_mm_menu_access_solver',
+    'access arguments' => array(1),
+    'type' => MENU_CALLBACK);
+  $items['.mm-users-json/%mm_mmtid/listusers/%'] = array(
+    'title' => 'Users for this group',
+    'page callback' => 'mm_large_group_get_users_json',
+    'page arguments' => array(1, 3),
+    'access callback' => '_mm_menu_access_edit',
+    'access arguments' => array(1),
+    'type' => MENU_CALLBACK);
+  $items['.mm-users-json/%mm_mmtid/deleteusers/%user'] = array(
+    'title' => 'Delete users from this group',
+    'file' => 'mm_ui_content.inc',
+    'page callback' => 'mm_large_group_delete_users',
+    'page arguments' => array(1, 3),
+    'access callback' => '_mm_menu_access_edit',
+    'access arguments' => array(1),
+    'type' => MENU_CALLBACK);
+  $items['.mm-users-json/%mm_mmtid/addusers/%'] = array(
+    'title' => 'Add users from this group',
+    'file' => 'mm_ui_content.inc',
+    'page callback' => 'mm_large_group_add_users',
+    'page arguments' => array(1, 3),
+    'access callback' => '_mm_menu_access_edit',
+    'access arguments' => array(1),
+    'type' => MENU_CALLBACK);
+
+  // Node operations
+  $items['mm/%mm_mmtid/node/%node/edit'] = array(
+    'title' => 'Edit',
+    'page callback' => 'mm_ui_node_edit',
+    'page arguments' => array(3),
+    'access callback' => 'node_access',
+    'access arguments' => array('update', 3),
+    'type' => MENU_CALLBACK);
+  $items['mm/%mm_mmtid/node/%node/delete'] = array(
+    'title callback' => '_mm_menu_title_node_delete',
+    'title arguments' => array(3),
+    'file' => 'mm_ui_node_delete.inc',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('mm_ui_node_delete_confirm', 1, 3),
+    'access callback' => '_mm_menu_access_node_delete',
+    'access arguments' => array(3),
+    'type' => MENU_CALLBACK);
+  $items['mm/%mm_mmtid/node/%node/restore'] = array(
+    'title' => 'Restore',
+    'file' => 'mm_ui_node_restore.inc',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('mm_ui_node_restore_confirm', 1, 3),
+    'access callback' => '_mm_menu_access_node_restore',
+    'access arguments' => array(1, 3),
+    'type' => MENU_CALLBACK);
+  // Node revisions
+  $items['mm/%mm_mmtid/node/%node/revisions'] = array(
+    'title' => 'Revisions',
+    'page callback' => 'mm_ui_node_revisions',
+    'page arguments' => array(1, 3),
+    'access callback' => '_mm_menu_access_node_revisions',
+    'access arguments' => array(3),
+    'type' => MENU_CALLBACK);
+  $items['mm/%mm_mmtid/node/%node/revisions/%/revert'] = array(
+    'title' => 'Revert to earlier revision',
+    'load arguments' => array(5),
+    'page callback' => 'mm_ui_node_revisions',
+    'page arguments' => array(1, 3, 5, 'revert'),
+    'access callback' => '_mm_menu_access_node_revisions',
+    'access arguments' => array(3),
+    'type' => MENU_CALLBACK);
+  $items['mm/%mm_mmtid/node/%node/revisions/%/delete'] = array(
+    'title' => 'Delete earlier revision',
+    'load arguments' => array(5),
+    'page callback' => 'mm_ui_node_revisions',
+    'page arguments' => array(1, 3, 5, 'delete'),
+    'access callback' => '_mm_menu_access_node_revisions',
+    'access arguments' => array(3),
+    'type' => MENU_CALLBACK);
+  $items['mm/%mm_mmtid/node/%node/revisions/%/view'] = array(
+    'title' => 'View a revision',
+    'load arguments' => array(5),
+    'page callback' => 'mm_ui_node_revisions',
+    'page arguments' => array(1, 3, 5, 'view'),
+    'access callback' => '_mm_menu_access_node_revisions',
+    'access arguments' => array(3),
+    'type' => MENU_CALLBACK);
+  $items['mm/%mm_mmtid/node/%node/revisions/%/view/%'] = array(
+    'title' => 'Compare revisions',
+    'load arguments' => array(5),
+    'page callback' => 'mm_ui_node_revisions',
+    'page arguments' => array(1, 3, 5, 'compare', 7),
+    'access callback' => '_mm_menu_access_node_revisions',
+    'access arguments' => array(3),
+    'type' => MENU_CALLBACK);
+  // alternate version of the above, used in the diff module
+  $items['mm/%mm_mmtid/node/%node/revisions/view/%'] = array(
+    'title' => 'Compare revisions',
+    'load arguments' => array(6),
+    'page callback' => 'mm_ui_node_revisions',
+    'page arguments' => array(1, 3, 6, 'compare', 7),
+    'access callback' => '_mm_menu_access_node_revisions',
+    'access arguments' => array(3),
+    'type' => MENU_CALLBACK);
+
+  return $items;
+}
+
+/**
+ * Implementation of hook_menu_alter().
+ */
+function monster_menus_menu_alter(&$callbacks) {
+  global $_mm_reserved_alias_defaults;
+
+  // override the function in user.module
+  $callbacks['user/autocomplete'] = array(
+    'title' => 'User autocomplete',
+    'page callback' => 'mm_autocomplete',
+    'page arguments' => array(TRUE),
+    'access callback' => 'user_access',
+    'access arguments' => array('access user profiles'),
+    'type' => MENU_CALLBACK);
+
+  if (isset($callbacks['taxonomy/term/%'])) {
+    // Override a couple of functions in taxonomy.module with our own versions
+    // which present only the results the user can see
+    $callbacks['taxonomy/term/%'] = array(
+      'title' => 'Taxonomy term',
+      'page callback' => 'mm_taxonomy_term_page',
+      'page arguments' => array(2),
+      'access arguments' => array('access content'),
+      'type' => MENU_CALLBACK,
+      'file' => 'mm_taxonomy.inc',
+      'module' => 'monster_menus',
+    );
+  }
+
+  // Remove the default node page, which displays all promoted nodes
+  $callbacks['node']['access callback'] = FALSE;
+
+  // The diff module uses a path which becomes longer than MENU_MAX_PARTS, so
+  // shorten it to 'mm/%mm_mmtid/node/%node/revisions/view/%', as defined in
+  // monster_menus_menu()
+  unset($callbacks['node/%node/revisions/view/%/%']);
+
+  $callbacks['mm/%mm_mmtid/comment/delete'] = array(
+    'title' => 'Delete comment',
+    'page callback' => 'mm_ui_comment',
+    'page arguments' => array(3),
+    'access arguments' => array('administer comments'),
+    'type' => MENU_CALLBACK,
+  );
+  $callbacks['mm/%mm_mmtid/comment/edit'] = array(
+    'title' => 'Edit comment',
+    'page callback' => 'mm_ui_comment',
+    'page arguments' => array(3),
+    'access arguments' => array('post comments'),
+    'type' => MENU_CALLBACK,
+  );
+  $callbacks['mm/%mm_mmtid/comment/reply/%node'] = array(
+    'title' => 'Reply to comment',
+    'page callback' => 'mm_ui_comment',
+    'page arguments' => array(3, 4),
+    'access callback' => 'node_access',
+    'access arguments' => array('view', 4),
+    'type' => MENU_CALLBACK,
+  );
+
+  // These menu entries rely upon core form functions that need to be loaded
+  // from disk when the MM menu entry is called
+  $callbacks['mm/%mm_mmtid/contents/add']['file'] = $callbacks['node/add']['file'];
+  $callbacks['mm/%mm_mmtid/contents/add']['module'] = $callbacks['node/add']['module'];
+  foreach (array(
+      'node/%node/edit',
+      'node/%node/revisions',
+      'node/%node/revisions/%/revert',
+      'node/%node/revisions/%/delete',
+      'comment/delete',
+      'comment/edit',
+      'comment/reply/%node',
+      ) as $old_path) {
+    $callbacks["mm/%mm_mmtid/$old_path"]['file'] = $callbacks[$old_path]['file'];
+    $callbacks["mm/%mm_mmtid/$old_path"]['module'] = $callbacks[$old_path]['module'];
+  }
+
+  mm_module_invoke_all_array('mm_menu_alter', array(&$callbacks));
+
+  foreach ($callbacks as $path => $callback) {
+    if (!isset($callbacks["mm/%mm_mmtid/$path"]) && (substr_compare('node/', $path, 0, 5) === 0 || substr_compare('comment/', $path, 0, 8) === 0)) {
+      if (substr_count($path, '/')+2 >= MENU_MAX_PARTS) {
+        drupal_set_message(t("The menu path @path is too long to be translated by Monster Menus. It may not work properly, depending on the module's code.", array('@path' => $path)));
+      }
+      else {
+        foreach (array('load arguments', 'access arguments', 'page arguments', 'title arguments') as $type) {
+          if (is_array($callback[$type])) {
+            foreach ($callback[$type] as $index => $val) {
+              if (is_int($val)) {
+                $callback[$type][$index] = $val + 2;
+              }
+            }
+          }
+        }
+
+        if ($callback['page callback'] == 'node_page_view') {
+          $callback['page callback'] = 'mm_node_page_view';
+        }
+
+        $callbacks["mm/%mm_mmtid/$path"] = $callback;
+        if (preg_match('{^node/%(\w+)(/|$)}', $path)) {
+          $callbacks[$path]['page callback'] = '_mm_menu_show_node';
+          $callbacks[$path]['page arguments'] = array(1);
+          $callbacks[$path]['access callback'] = 'mm_content_user_can_node';
+          $callbacks[$path]['access arguments'] = array(1, 'r');
+        }
+        else {
+          unset($callbacks[$path]);
+        }
+      }
+    }
+  }
+
+  // Override the default node delete page
+  $callbacks['node/%node/delete'] = array(
+    'title callback' => '_mm_menu_title_node_delete',
+    'title arguments' => array(1),
+    'file' => 'mm_ui_node_delete.inc',
+    'module' => 'monster_menus',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('mm_ui_node_delete_confirm', NULL, 1),
+    'access callback' => '_mm_menu_access_node_delete',
+    'access arguments' => array(1),
+    'type' => MENU_LOCAL_TASK
+  );
+
+  // Override the default node revisions page
+  $callbacks['node/%node/revisions'] = array(
+    'title' => 'Revisions',
+    'page callback' => 'mm_ui_node_revisions',
+    'page arguments' => array(1),
+    'access callback' => '_mm_menu_access_node_revisions',
+    'access arguments' => array(1),
+    'type' => MENU_CALLBACK
+  );
+  if ($callbacks['node/%node/revisions/%/view']['page callback'] == 'node_show') $callbacks['node/%node/revisions/%/view']['page callback'] = 'mm_node_show';
+
+  // Generate the list of keywords that are not allowed in URL aliases, and give
+  // an error message if there already is something in mm_tree using one of the
+  // menu keywords.
+  $checked = array();
+  foreach ($callbacks as $path => $callback) {
+    $elems = explode('/', $path);
+    if (!isset($checked[$elems[0]])) $checked[$elems[0]] = db_result(db_query("SELECT COUNT(*) FROM {mm_tree} WHERE alias = '%s'", $elems[0]));
+    $failed_check = $checked[$elems[0]] > 0;
+
+    if ($elems[1] == '%mm_mmtid' && count($elems) >= 3) {
+      $reserved[$elems[2]] = TRUE;
+      if (!isset($checked[$elems[2]])) $checked[$elems[2]] = db_result(db_query("SELECT COUNT(*) FROM {mm_tree} WHERE alias = '%s'", $elems[2]));
+      if ($checked[$elems[2]] > 0) $failed_check = TRUE;
+      if (!$failed_check) $reserved[$elems[2]] = TRUE;
+    }
+
+    if ($failed_check) {
+      $error = 'The menu entry %entry defined by module %module conflicts with one or more URL names that are already assigned to MM pages. It has been disabled. Fix the problem and rebuild the menus.';
+      $err_arr = array('%entry' => $path, '%module' => $callback['module']);
+      if (user_access('administer all menus')) drupal_set_message(t($error, $err_arr), 'error');
+      watchdog(WATCHDOG_ERROR, $error, $err_arr);
+      unset($callbacks[$path]);
+    }
+    else $reserved[$elems[0]] = TRUE;
+  }
+  variable_set('mm_reserved_alias', array_merge(array_keys($reserved), $_mm_reserved_alias_defaults));
+
+  // Regenerate the list of MM tree entry names to hide from non-admin users
+  $hidden_names = array(MM_ENTRY_NAME_DEFAULT_USER, MM_ENTRY_NAME_DISABLED_USER);
+  $hidden_names = array_merge($hidden_names, mm_module_invoke_all('mm_hidden_user_names'));
+  variable_set('mm_hidden_user_names', $hidden_names);
+  // debug_add_dump($callbacks);
+
+  // Regenerate the custom page display list
+  _mm_showpage_router(TRUE);
+}
+
+/**
+ * Implementation of hook_link().
+ */
+function monster_menus_link($type, $node, $teaser = FALSE) {
+  global $_mm_mmtid_of_node, $_mm_page_args;
+
+  $node_types = array_keys(node_get_types('names'));
+  $links = array();
+  _mm_menu_active_item();
+  if (isset($node) && isset($_mm_mmtid_of_node[$node->nid]) && array_search($node->type, $node_types) !== FALSE) {
+    $defaults = array();
+    if (!empty($_REQUEST['destination'])) {
+      $defaults = array('query' => array('destination' => $_REQUEST['destination']));
+    }
+    $pa = empty($_mm_page_args) ? "$type/" : "$_mm_page_args/$type/";
+
+    $revisions = db_fetch_object(db_query('SELECT n.vid AS current_vid, COUNT(*) AS count_revisions FROM {node_revisions} r INNER JOIN {node} n ON n.nid = r.nid WHERE r.nid = %d', $node->nid));
+
+    $is_latest = $revisions->current_vid == $node->vid;
+    if ($is_latest && node_access('update', $node))
+        $links[] = $defaults + array('title' => t('Edit'), 'href' => $pa . $node->nid . '/edit');
+
+    if (_mm_menu_access_node_delete($node)) {
+      if (_mm_menu_access_node_restore($_mm_mmtid_of_node[$node->nid], $node)) {
+        $links[] = $defaults + array(
+          'title' => t('Restore'),
+          'href' => $pa . $node->nid . '/restore');
+      }
+      if ($is_latest) {
+        $links[] = $defaults + array(
+          'title' => mm_content_node_is_recycled($node) ? t('Delete permanently') : t('Delete'),
+          'href' => $pa . $node->nid . '/delete');
+      }
+    }
+
+    if (node_access('update', $node) && node_access('view', $node) && (user_access('view revisions') || user_access('administer nodes')) && $revisions->count_revisions > 1) {
+      $links[] = $defaults + array('title' => t('Revisions'),
+          'href' => $pa . $node->nid . '/revisions');
+      if (!$is_latest) {
+        $links[] = $defaults + array('title' => t('Revert to this revision'),
+            'href' => $pa . $node->nid . '/revisions/' . $node->vid . '/revert');
+        $links[] = $defaults + array('title' => t('Delete this revision'),
+            'href' => $pa . $node->nid . '/revisions/' . $node->vid . '/delete');
+      }
+    }
+  }
+  return $links;
+}
+
+/**
+ * Implementation of hook_link_alter().
+ */
+function monster_menus_link_alter(&$links, &$node) {
+  if ($node->need_comment_alter && function_exists('comment_link')) {
+    unset($links['comment_forbidden']);   // remove links already generated
+    unset($links['comment_add']);
+    $node->need_comment_alter = FALSE;    // prevent this code from being called twice per node
+    $node->comment = $node->old_comment;  // reset the comment type
+    if (_mm_content_comments_readable($node)) {
+      $links = array_merge($links, comment_link('node', $node, TRUE));
+    }
+    else {
+      $links['comment_forbidden'] = array('title' => theme('comment_post_forbidden', $node, TRUE), 'html' => TRUE);
+    }
+    $node->comment = 0;                   // turn comments back off for body generation
+  }
+}
+
+/**
+ * Implementation of hook_boot().
+ */
+function monster_menus_boot() {
+  global $user;
+
+  if ($user->uid > 0) {
+    mm_set_user_roles($user);
+
+    // force the code in monster_menus_user('load') to run
+    if (!module_exists('amherstprofile')) {
+      require_once './includes/common.inc';
+      module_load_include('module', 'user', 'user');
+      user_load($user->uid);
+    }
+  }
+
+  // Rewrite the URL stored in $_GET so that MM aliases point to the correct location
+  require_once './includes/unicode.inc';
+  $old_q = $new_q = isset($_GET['q']) ? $_GET['q'] : '';
+  custom_url_rewrite_inbound($new_q, $new_q, NULL);
+  if ($new_q != '' || $_GET['q'] == mm_home_path() || $_GET['q'] == mm_home_path() . '/') {
+    $_GET['q'] = $new_q;
+    if ($_SERVER['REQUEST_METHOD'] == 'GET' || $_SERVER['REQUEST_METHOD'] == 'HEAD') {
+      // If the URL contains mm/N or just N, redirect to the appropriate alias
+      if (preg_match('{^(mm/)?\d+/?$}', $old_q)) {
+        require_once './includes/path.inc';
+        require_once './includes/common.inc';
+        custom_url_rewrite_outbound($new_q, $dummy, $new_q);
+        if ($new_q != $old_q) {
+          module_load_include('module', 'filter', 'filter');
+          $GLOBALS['devel_shutdown'] = TRUE;    // prevent a missing function problem
+          drupal_goto($new_q, drupal_query_string_encode($_GET, array('q')));
+        }
+      }
+    }
+  }
+
+  mm_set_custom_theme();
+}
+
+/**
+ * Given the alias, return the internal path.
+ *
+ * @param $result
+ *   The Drupal path based on the database. If there is no match in the database
+ *   it'll be the same as $path.
+ * @param $path
+ *   The path to be rewritten.
+ * @param $path_language
+ *   An optional language code to rewrite the path into.
+ */
+function custom_url_rewrite_inbound(&$result, $path, $path_language) {
+  static $cache;
+
+  // remove empty '//' elements
+  $path = preg_replace('{/+}', '/', $path);
+  $path = trim($path, '/');
+
+  $result = $path;
+  if ($path == '' || $path == mm_home_path()) {
+    $result = mm_home_path();
+    return;
+  }
+
+  if (isset($cache[$path])) {
+    $result = $cache[$path];
+    return;
+  }
+//   require_once "sites/all/modules/amherst/AMH_debug.inc";
+//   debug_add("* from: $path");
+
+  $elems = explode('/', $path);
+  $in_mm = FALSE;
+  if ($elems[0] == 'mm') {
+    $in_mm = TRUE;
+    array_shift($elems);
+  }
+
+  if ($elems[0] == mm_home_mmtid()) {
+    $in_mm = TRUE;
+    $this_mmtid = $parent = mm_home_mmtid();
+    array_shift($elems);
+  }
+
+  if (count($elems) >= 2 && ($elems[0] == mm_content_users_alias() || is_numeric($elems[0]) && $elems[0] == mm_content_users_mmtid()) && strlen($elems[1]) == 1 && variable_get('mm_use_virtual_user_dir', TRUE)) {
+    $in_mm = TRUE;
+    $alias = ctype_alpha($elems[1][0]) ? strtoupper($elems[1][0]) : '~';
+    array_splice($elems, 0, 2);
+    $this_mmtid = $parent = count($elems) ? mm_content_users_mmtid() : -ord($alias);
+  }
+
+  $joins = $wheres = $numeric = array();
+  $reserved = variable_get('mm_reserved_alias', array());
+  $max = min(count($elems), MM_CONTENT_MYSQL_MAX_JOINS);
+  for ($i = 0; $i < $max; $i++) {
+    $elem = $elems[$i];
+    $numeric[$i] = FALSE;
+    if (!$in_mm && $i == 0 && ($elem == 'settings' || $elem == 'contents')) {
+      $in_mm = TRUE;
+      $this_mmtid = mm_home_mmtid();
+      break;
+    }
+    else if (array_search($elem, $reserved) === FALSE) {
+      $n = count($joins);
+      $nprev = $n - 1;
+      $joins[] = "{mm_tree} t$n" . ($n ? " ON t$n.parent = t$nprev.mmtid" : '');
+      $prefix = $n ? '' : (empty($parent) ? '' : "t0.parent = $parent AND ");
+      $middle = $n ? '' : (empty($parent) ? 't0.parent IN(1, ' . mm_home_mmtid() . ') AND ' : '');
+      $numeric[$i] = is_numeric($elem) && intval($elem) == $elem && $elem != 0;
+      if ($numeric[$i] && $elem > 0) {
+        $wheres[] = "{$prefix}(t$n.mmtid = $elem OR {$middle}t$n.alias = $elem)";
+      }
+      else {
+        $elem = db_escape_string($elem);
+        $wheres[] = "{$prefix}{$middle}t$n.alias = '$elem'";
+      }
+    }
+    else break;
+  }
+
+  while ($joins) {
+    $n = count($joins) - 1;
+    $new_mmtid = mm_query_result("SELECT t$n.mmtid FROM " . join(' INNER JOIN ', $joins) . ' WHERE ' . join(' AND ', $wheres));
+    array_pop($joins);
+    array_pop($wheres);
+    $was_numeric = array_pop($numeric);
+    if ($new_mmtid) {
+      $in_mm = TRUE;
+      $this_mmtid = $new_mmtid;
+      break;
+    }
+    else if ($was_numeric) {
+      if ($elems[0] < 0) {
+        $this_mmtid = $elems[0];
+        $in_mm = TRUE;
+        break;
+      }
+      else if (!count($joins)) {
+        $site_404 = variable_get('site_404', '');
+        if ($site_404 && $site_404 != $path) {
+          custom_url_rewrite_inbound($result, $site_404, $path_language);
+          return;
+        }
+        break;
+      }
+    }
+    $i--;
+  }
+
+  if ($in_mm) {
+    $elems = array_slice($elems, $i);
+    array_unshift($elems, "mm/$this_mmtid");
+    $result = implode('/', $elems);
+  }
+  $cache[$path] = $result;
+//   debug_add("* to: $result ");
+}
+
+/**
+ * Given the internal path, return the alias.
+ *
+ * @param $path
+ *   The alias of the $original_path as defined in the database.
+ *   If there is no match in the database it'll be the same as $original_path
+ * @param $options
+ *   An array of link attributes such as query string and fragment. See url().
+ * @param $unused
+ *   The unaliased Drupal path that is being linked to. (unused)
+ */
+function custom_url_rewrite_outbound(&$path, &$options, $unused) {
+  global $_mm_custom_url_rewrite_outbound_cache;
+  if (!isset($_mm_custom_url_rewrite_outbound_cache)) $_mm_custom_url_rewrite_outbound_cache = array();
+  $original_path = $path;
+
+  if ($path == 'user/login' && function_exists('pubcookie_login_url')) {
+    $destination = NULL;
+    if (!empty($options['query'])) {
+      $query = split('&', $options['query']);
+      foreach ($query as $key => $value)
+        if (strpos($value, 'destination=') === 0) {
+          $destination = urldecode(substr($value, 12));
+          unset($query[$key]);
+        }
+      $options['query'] = join('&', $query);
+    }
+    $path = pubcookie_login_url($destination);
+    return;
+  }
+
+  $cache_id = $original_path . ':' . $options['query'];
+  if (isset($_mm_custom_url_rewrite_outbound_cache[$cache_id])) {
+    $path = $_mm_custom_url_rewrite_outbound_cache[$cache_id];
+    return;
+  }
+
+//    debug_add("** from: $path");
+  if (($arg0 = mm_parse_args($mmtids, $oarg_list, $this_mmtid, $path)) == 'mm') {
+    if ($mmtids[0] == mm_home_mmtid()) {
+      if (count($mmtids) == 1 && count($oarg_list)) {
+        $_mm_custom_url_rewrite_outbound_cache[$cache_id] = $path;
+        return;
+      }
+      array_shift($mmtids);
+    }
+
+    $test_path = "mm/$this_mmtid";
+    if (isset($_mm_custom_url_rewrite_outbound_cache[$test_path])) {
+      $path = implode('/', array_merge(array($_mm_custom_url_rewrite_outbound_cache[$test_path]), $oarg_list));
+      $_mm_custom_url_rewrite_outbound_cache[$original_path] = $path;
+      return;
+    }
+
+    $tree = mm_content_get($mmtids);
+
+    foreach ($mmtids as $i => $mmtid)
+      foreach ($tree as $key => $item)
+        if ($item->mmtid == $mmtid) {
+          if ($item->alias != '') $mmtids[$i] = $item->alias;
+          unset($tree[$key]);
+          break;
+        }
+
+    $path = implode('/', array_merge($mmtids, $oarg_list));
+
+    mm_module_invoke_all_array('mm_url_rewrite_outbound', array($this_mmtid, &$path, &$options, $original_path));
+  }
+  else if ($path != '') {
+    $curr_page = _mm_menu_active_item();
+    $link_page = _mm_menu_active_item($path);
+
+    $mmtid = isset($curr_page->mmtid) ? $curr_page->mmtid : (isset($link_page->mmtid) ? $link_page->mmtid : NULL);
+    if ($mmtid && !is_null($link_page->nid)) {
+      $path = implode('/', array_merge(array('mm', $mmtid, $arg0), $oarg_list));
+    }
+
+    mm_module_invoke_all_array('mm_url_rewrite_outbound', array($mmtid, &$path, &$options, $original_path));
+
+    if ($mmtid && $path != $original_path) {
+      custom_url_rewrite_outbound($path, $options, $original_path);
+    }
+  }
+  // Don't use $cache_id here, since $options['query'] may have changed
+  $_mm_custom_url_rewrite_outbound_cache[$original_path . ':' . $options['query']] = $path;
+//    debug_add("** to: $path ");
+}
+
+/**
+ * Implementation of hook_block().
+ *
+ * This hook both declares to Drupal what blocks are provided by the module, and
+ * generates the contents of the blocks themselves.
+ */
+function monster_menus_block($op = 'list', $delta = 0, $edit = array()) {
+  // The $op parameter determines what piece of information is being requested.
+  switch ($op) {
+    case 'list':
+      // If $op is "list", we just need to return a list of block descriptions.
+      // This is used to provide a list of possible blocks to the administrator,
+      // end users will not see these descriptions.
+      return mm_content_get_blocks();
+
+    case 'configure':
+      return;
+
+    case 'save':
+      return;
+
+    case 'view':
+    default:
+      // If $op is "view", then we need to generate the block for display
+      // purposes. The $delta parameter tells us which block is being requested.
+      $blocks = mm_content_get_blocks();
+      mm_parse_args($mmtids, $oarg_list, $this_mmtid);
+      $show_arr = mm_module_invoke_all('mm_menus_block_shown', $this_mmtid, $delta);
+      if ($show_arr && array_product($show_arr) == 0) return;
+      if (isset($blocks[$delta])) {
+        $i = 0;
+        $block['content'] = '';
+        if (!count($mmtids)) $mmtids = array(mm_home_mmtid());
+
+        // Search up the path, looking for the bottom-most block with an
+        // entry in mm_tree_block.
+        if ($starters = mm_content_get_blocks_at_mmtid($mmtids, $delta, TRUE)) {
+          $starter = array_pop($starters);
+          $start = $starter['mmtid'];
+
+          $b = $blocks[$delta];
+          if ($b['show_node_contents']) {
+            $here = NULL;
+          }
+          else {
+            $here = array($start);
+            if (($i = array_search($start, $mmtids)) !== FALSE)
+                $here = array_slice($mmtids, $i);
+          }
+
+          $params = array(
+            MM_GET_TREE_ADD_TO_CACHE => TRUE,
+            MM_GET_TREE_BLOCK => $delta,
+            MM_GET_TREE_DEPTH => $starter['max_depth'],
+            MM_GET_TREE_HERE => $here,
+            MM_GET_TREE_PRUNE_PARENTS => TRUE,
+            MM_GET_TREE_RETURN_NODE_COUNT => variable_get('mm_hide_empty_pages', FALSE),
+            MM_GET_TREE_RETURN_PERMS => TRUE,
+            MM_GET_TREE_SORT => TRUE,
+          );
+          $tree = mm_content_get_tree($start, $params);
+          $can_edit = $tree[0]->perms['w'] || $tree[0]->perms['a'] || $tree[0]->perms['u'];
+
+          if ($b['title_is_cat']) $name = $tree[0]->name;
+
+          if ($b['show_node_contents']) {
+            $prev = $tree[0]->level;
+
+            foreach ($tree as $t)
+              if (!$t->perms['IS_RECYCLED']) {
+                if ($t->level <= $prev)
+                  array_splice($mmtids, $prev - $t->level - 1);
+
+                $mmtids[] = $t->mmtid;
+
+                $content .= _mm_render_pages($mmtids, array(), $err, TRUE, $b['allow_rss'], $delta);
+                $prev = $t->level;
+              }
+
+            $block['content'] = $content;
+          }
+          else {
+            $start = $b['title_is_cat'] ? 1 : 0;
+
+            if ($tree[$start]->parent == 1) {
+              $parents = array('mm');
+            }
+            else {
+              $parents = explode(',', $tree[$start]->parents);
+              $parents[] = $tree[$start]->parent;
+              $parents[0] = 'mm';
+            }
+
+            $content = mm_content_render_tree($tree, $start, $path, $parents);
+
+            if ($content != '' || $b['title_is_cat'] && $can_edit) {
+              $block['content'] = "<ul class=\"menu\">$content</ul>";
+            }
+          }
+
+          if ($b['title_is_cat'] || $b['show_node_contents']) {
+            $edit_links = array();
+            if ($can_edit) $edit_links[] = l('Edit',
+                mm_content_get_mmtid_url($start) .
+                ($b['show_node_contents'] ? '' : '/settings/edit'));
+
+            foreach ($starters as $other)
+              if (($perms = mm_content_user_can($other['mmtid'])) &&
+                  ($perms['w'] || $perms['a'] || $perms['u']))
+                $edit_links[] = l('Edit hidden',
+                    mm_content_get_mmtid_url($other['mmtid']) .
+                    ($b['show_node_contents'] ? '' : '/settings/edit'));
+
+            if (count($edit_links)) {
+              $block['content'] = '<div class="mm-block-links"> [' . join(' | ', $edit_links) . ']</div>' . $block['content'];
+            }
+          }
+        }
+
+        $block['subject'] = isset($name) ? $name : $b['title'];
+      }
+      else {
+        $block = array('content' => '', 'subject' => '');
+      }
+      return $block;
+  }
+}
+
+/**
+ * Implementation of hook_cron().
+ *
+ * Updates the table containing all results of virtual group queries; flushes
+ * any recycled content that has expired; updates the virtual user directory cache
+ */
+function monster_menus_cron() {
+  // update any parts of the tree with dirty sort indices
+  mm_content_update_sort(1, FALSE);
+
+  // regenerate mm_virtual_group if needed
+  mm_regenerate_vgroup();
+
+  // Keep track of the average time between cron runs, so that we can tell the
+  // user in mm_content_get_recycle_autodel_time() when recycling bins are likely to be
+  // automatically emptied
+  //
+  // average_time_between_runs = (mm_cron_run_last - mm_cron_run_since) / mm_cron_run_count
+  //      likely_next_cron_run = mm_cron_run_last + average_time_between_runs
+  //
+  variable_set('mm_cron_run_count', variable_get('mm_cron_run_count', -1) + 1);
+  if (variable_get('mm_cron_run_since', 0) == 0)
+      variable_set('mm_cron_run_since', time());
+  variable_set('mm_cron_run_last', time());
+
+  global $user;
+  session_save_session(FALSE);  // in case of error, don't save session as wrong user
+  $old_user = $user;
+  $user = user_load(array('uid' => 1));   // run as admin user
+  mm_content_empty_all_bins();
+  // other tasks that must run as admin can be added here
+  $user = $old_user;            // reset user from above
+  session_save_session(TRUE);   // re-enable session saving
+
+  // Clear out the group editing temp table
+  db_query("DELETE FROM m USING {mm_group_temp} m LEFT JOIN {sessions} s ON m.sessionid = s.sid WHERE s.timestamp IS NULL");
+
+  // add any future tasks here, outside of admin user block
+}
+
+/**
+ * Implementation of hook_footer().
+ */
+function monster_menus_footer($main = 0) {
+  $footer = mm_node_alert_add_to_footer();
+  if (function_exists('AMH_debug_footer')) $footer .= AMH_debug_footer();
+  return $footer;
+}
+
+/**
+ * Implementation of hook_exit().
+ */
+function monster_menus_exit($main = 0) {
+  // Process any queued changes to the sort index
+  mm_content_update_sort_queue();
+}
+
+/**
+ * Implementation of hook_user().
+ *
+ * This hook is called by Drupal when an action is performed on a user account.
+ */
+function monster_menus_user($op, &$edit, &$account, $category = NULL) {
+  foreach (mm_module_implements('mm_user') as $module) {
+    if (call_user_func_array($module . '_mm_user', array($op, $edit, $account, $category))) return;
+  }
+
+  switch ($op) {
+    case 'insert':
+      mm_content_add_user($account);
+      break;
+
+    case 'delete':
+      if ($account->user_mmtid) mm_content_move_to_disabled($account->user_mmtid);
+      db_query('DELETE FROM {mm_group} WHERE uid = %d', $account->uid);
+      db_query('DELETE FROM {mm_virtual_group} WHERE uid = %d', $account->uid);
+      db_query('DELETE FROM {mm_tree_bookmarks} WHERE uid = %d', $account->uid);
+      break;
+
+    case 'load':
+      if ($account->uid > 0) {
+        global $user;
+        $home = mm_content_get(array('f.flag' => 'user_home', 'f.data' => $account->uid), MM_GET_FLAGS);
+        if (is_object($home[0])) {
+          $account->user_mmtid = $home[0]->mmtid;
+          if ($account->uid == $user->uid) $user->user_mmtid = $home[0]->mmtid;
+        }
+        mm_set_user_roles($account);
+      }
+      break;
+
+    case 'logout':
+      // The access field is used by mm_node_alert_add_to_footer(), but only
+      // gets updated at most every 180 seconds. Update it now, so that it's
+      // accurate when the user next logs-in.
+      db_query("UPDATE {users} SET access = %d WHERE uid = %d", time(), $account->uid);
+      break;
+  }
+}
+
+/**
+ * Implementation of hook_nodeapi().
+ */
+function monster_menus_nodeapi(&$node, $op, $a3, $a4) {
+  $list = monster_menus_node_info();
+  if (isset($list[$node->type])) {
+    $mm_nodefunc = $list[$node->type]['module'] . '_nodeapi';
+    if (function_exists($mm_nodefunc)) $mm_nodefunc($node, $op, $a3, $a4);
+  }
+
+  $all_menus = user_access('administer all menus');
+
+  switch ($op) {
+    case 'load':
+      $node->mm_catlist = array();
+      foreach (mm_content_get(mm_content_get_by_nid($node->nid)) as $r)
+        $node->mm_catlist[$r->mmtid] = mm_content_expand_name($r->name);
+
+      $node->others_w = FALSE;
+      $node->users_w = $node->groups_w = array();
+      $result = db_query('SELECT gid FROM {mm_node_write} WHERE nid = %d',
+          $node->nid);
+
+      while ($r = db_fetch_object($result))
+        if ($r->gid == 0) {
+          $node->others_w = TRUE;
+        }
+        else if ($r->gid < 0) {
+          $node->users_w = array_fill_keys(mm_content_get_uids_in_group($r->gid), '');
+        }
+        else {
+          $node->groups_w[$r->gid] = '';
+        }
+
+      $result = db_query("SELECT * FROM {mm_recycle} WHERE type = 'node' AND id = %d",
+          $node->nid);
+
+      $node->recycle_bins = $node->recycle_from_mmtids = array();
+      while ($r = db_fetch_object($result)) {
+        // display the oldest recycle date to the user
+        if (!isset($node->recycle_date) || $r->recycle_date < $node->recycle_date) $node->recycle_date = $r->recycle_date;
+        $node->recycle_bins[] = $r->bin_mmtid;
+        $node->recycle_from_mmtids[] = $r->from_mmtid;
+      }
+      $node->recycle_bins = array_unique($node->recycle_bins);
+      $node->recycle_from_mmtids = array_unique($node->recycle_from_mmtids);
+
+      $node_info = db_fetch_array(db_query('SELECT show_node_info, comments_readable FROM {mm_node_info} WHERE nid = %d', $node->nid));
+      if (is_array($node_info)) {
+        $node = (object)((array)$node + $node_info);
+      }
+
+      $publish = db_fetch_array(db_query('SELECT publish_on, unpublish_on, set_change_date FROM {mm_node_schedule} WHERE nid = %d', $node->nid));
+      if (is_array($publish)) {
+        $node = (object)((array)$node + $publish);
+      }
+      break;
+
+    case 'validate':
+      if (count($node->mm_catlist)) {
+        foreach ($node->mm_catlist as $mmtid => $name) {
+          if (!$mmtid || !mm_content_user_can($mmtid, 'u'))
+            form_set_error('mm_catlist',
+                t('You are not allowed to assign content to the page %cat.',
+                array('%cat' => $name)));
+          else if (mm_content_is_archive($mmtid))
+            form_set_error('mm_catlist',
+                t('The page %cat is an archive of another page. Assign the content to the main page, and the archive will be updated automatically.',
+                array('%cat' => $name)));
+        }
+      }
+      else if (empty($node->mm_catlist_restricted)) {
+        form_set_error('mm_catlist',
+            t('You must assign this content to at least one page.'));
+      }
+
+      if ($all_menus) _mm_ui_verify_userlist($node->owner, 'owner');
+
+      if (!$node->mm_skip_perms) {
+        if (is_array($node->groups_w))
+          foreach ($node->groups_w as $gid => $name) {
+            if ($gid && !mm_content_user_can($gid, 'u'))
+              form_set_error('groups_w',
+                  t('You do not have permission to use the group %grp.',
+                  array('%grp' => $name)));
+          }
+
+        if (is_array($node->users_w))
+          _mm_ui_verify_userlist($node->users_w, 'users_w');
+      }
+
+      if (!empty($node->publish_on) && !empty($node->unpublish_on)) {
+        $publish_on = strtotime($node->publish_on);
+        $unpublish_on = strtotime($node->unpublish_on);
+        if ($unpublish_on > 0 && $unpublish_on < $publish_on) {
+          form_set_error('unpublish_on',
+              t('You have chosen an unpublish date earlier than the publish date.'));
+        }
+      }
+      break;
+
+    case 'presave':
+      if ($all_menus && isset($node->owner) && ($account = user_load(array('uid' => $node->owner)))) {
+        $node->uid = $node->owner;
+        $node->name = $account->name;
+      }
+
+      if (isset($node->all_values_group)) {
+        list($groups, $users, $others) = _mm_ui_form_parse_perms((array)$node, FALSE);
+        $node->groups_w = array_flip(array_keys($groups));
+        $node->users_w = array_flip(array_keys($users));
+        $node->others_w = !empty($node->{'node-everyone'});
+      }
+      break;
+
+    case 'update':
+      if (!mm_content_node_is_recycled($node)) {
+        if (!isset($node->mm_catlist_restricted)) $node->mm_catlist_restricted = array();
+        $list = array_merge(array_keys($node->mm_catlist), $node->mm_catlist_restricted);
+        if ($list) {
+          db_query('DELETE FROM {mm_node_reorder} WHERE nid = %d AND mmtid NOT IN(' . db_placeholders($list) . ')', array_merge(array($node->nid), $list));
+        }
+        else {
+          db_query('DELETE FROM {mm_node_reorder} WHERE nid = %d', $node->nid);
+        }
+      }
+      // no break
+
+    case 'insert':
+      if (!mm_content_node_is_recycled($node)) {
+        db_query('DELETE FROM {mm_node2tree} WHERE nid = %d', $node->nid);
+        if (is_array($node->mm_catlist)) {
+          if (!isset($node->mm_catlist_restricted)) $node->mm_catlist_restricted = array();
+          foreach (array_merge(array_keys($node->mm_catlist), $node->mm_catlist_restricted) as $mmtid)
+            db_query('INSERT INTO {mm_node2tree} (nid, mmtid) VALUES(%d, %d)',
+                $node->nid, $mmtid);
+        }
+      }
+
+      mm_content_set_node_perms($node);
+
+      db_query("UPDATE {mm_node_info} SET show_node_info = %d, comments_readable = '%s' WHERE nid = %d", $node->show_node_info, $node->comments_readable, $node->nid);
+      if (!db_affected_rows()) @db_query("INSERT INTO {mm_node_info} (nid, show_node_info, comments_readable) VALUES(%d, %d, '%s')", $node->nid, $node->show_node_info, $node->comments_readable);
+
+      if (!empty($node->publish_on)) {
+        $node->publish_on = strtotime($node->publish_on);
+        if ($node->publish_on <= 0) $node->publish_on = 0;
+      }
+      if (!empty($node->unpublish_on)) {
+        $node->unpublish_on = strtotime($node->unpublish_on);
+        if ($node->unpublish_on <= 0) $node->unpublish_on = 0;
+      }
+      if ($node->publish_on || $node->unpublish_on || $node->set_change_date) {
+        db_query('UPDATE {mm_node_schedule} SET publish_on = %d, unpublish_on = %d, set_change_date = %d WHERE nid=%d', $node->publish_on, $node->unpublish_on, $node->set_change_date, $node->nid);
+        if (!db_affected_rows()) @db_query('INSERT INTO {mm_node_schedule} (nid, publish_on, unpublish_on, set_change_date) VALUES(%d, %d, %d, %d)', $node->nid, $node->publish_on, $node->unpublish_on, $node->set_change_date);
+      }
+      else if ($op != 'insert') {
+        db_query('DELETE FROM {mm_node_schedule} WHERE nid = %d', $node->nid);
+      }
+
+      break;
+
+    case 'delete':
+      db_query('DELETE FROM {mm_node2tree} WHERE nid = %d', $node->nid);
+      db_query('DELETE FROM {mm_node_reorder} WHERE nid = %d', $node->nid);
+      db_query("DELETE FROM {mm_recycle} WHERE type = 'node' AND id = %d", $node->nid);
+      db_query('DELETE FROM {mm_node_info} WHERE nid = %d', $node->nid);
+      db_query('DELETE FROM {mm_node_schedule} WHERE nid = %d', $node->nid);
+      _mm_ui_delete_node_groups($node, TRUE);
+      break;
+
+    case 'view':
+      if ($node->nid && !mm_content_user_can_node($node, 'r')) {
+        mm_node_load_fail($node, $a3);
+      }
+      else {
+        if ($a3 && $node->readmore) {
+          $node->content['mm_readmore'] = array('#weight' => 1000, '#value' => '<div class="read-more">' .
+            l(t('Read more &raquo;'), "node/$node->nid", array('html' => TRUE, 'attributes' => array('title' => t('Read the rest of this post')))) . '</div>');
+          unset($node->readmore);
+        }
+
+        // If this is a view rendering a node not on an MM page, allow the
+        // Edit/Delete/etc. links to appear.
+        if (isset($node->view) && isset($node->view->style_plugin) && isset($node->view->style_plugin->row_plugin) && $node->view->style_plugin->row_plugin->options['links']) {
+          global $_mm_mmtid_of_node;
+          $_mm_mmtid_of_node[$node->nid] = TRUE;
+        }
+      }
+      $node->title = mm_ui_hide_node_title($node->title);
+      break;
+
+    case 'access':
+      if ($node->nid) {
+        return mm_content_node_access($a3, $node, $a4);
+      }
+      break;
+
+    case 'rss item':
+      if ($node->nid) {
+        $node->created = $node->changed;
+      }
+      break;
+  }
+}

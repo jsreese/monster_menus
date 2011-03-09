@@ -1,0 +1,155 @@
+<?php
+// $Id: monster_menus_views.module 4661 2010-10-13 19:35:41Z dan $
+
+/**
+ * @file
+ * Views interface for Monster Menus
+ */
+
+/**
+ * Implementation of hook_views_data().
+ */
+function monster_menus_views_data() {
+  $data = array();
+
+  $data['node']['mm_edit_node'] = array(
+    'field' => array(
+      'title' => t('Edit link (MM)'),
+      'help' => t('Provide a link to edit the node which is Monster Menus-aware.'),
+      'handler' => 'monster_menus_views_handler_field_node_link_edit',
+    ),
+  );
+
+  // ----------------------------------------------------------------------
+  // mm_recycle table
+
+  $data['mm_recycle']['table']['group'] = t('MM');
+  // Explain how this table joins to others.
+  $data['mm_recycle']['table']['join'] = array(
+    'node' => array(
+      'field' => 'id',
+      'left_table' => 'node',
+      'left_field' => 'nid',
+      'extra' => array(array('field' => 'type', 'value' => 'node')),
+    ),
+  );
+
+  $data['mm_recycle']['recycled'] = array(
+    'title' => t('Recycled'), // Appears in views UI.
+    'help' => t('Whether or not the node is in a recycle bin.'),
+//     'field' => array(
+//       'handler' => 'monster_menus_views_handler_field_recycled',
+//       'click sortable' => TRUE,
+//      ),
+    'filter' => array(
+      'handler' => 'monster_menus_views_handler_filter_recycled',
+      'label' => t('Is recycled'),
+    ),
+  );
+
+  // ----------------------------------------------------------------------
+  // mm_node2tree table
+
+  $data['mm_node2tree']['table']['group'] = t('MM');
+  // Explain how this table joins to others.
+  $data['mm_node2tree']['table']['join'] = array(
+    'node' => array(
+      'field' => 'nid',
+      'left_field' => 'nid',
+    ),
+  );
+
+  $data['mm_node2tree']['mmtid'] = array(
+    'title' => t('Nodes on MM page'), // Appears in views UI.
+    'help' => t('Nodes on one or more pages in MM.'),
+    'relationship' => array(
+      'base' => 'node',
+      'base field' => 'nid',
+      'relationship field' => 'nid',
+      'label' => t('Nodes on MM page(s)'),
+    ),
+    'argument' => array(
+      'handler' => 'views_handler_argument_many_to_one',
+      'numeric' => TRUE,
+    ),
+  );
+
+  // ----------------------------------------------------------------------
+  // node_revisions table
+
+  // Define the base group of this table. Fields that don't
+  // have a group defined will go into this field by default.
+  $data['mm_node_revisions']['table']['group'] = t('Node revision');
+
+  // For other base tables, explain how we join
+  $data['mm_node_revisions']['table']['join'] = array(
+    // Directly links to node table.
+    'node' => array(
+      'left_field' => 'nid',
+      'field' => 'nid',
+      'table' => 'node_revisions',
+    ),
+  );
+  $data['mm_node_revisions']['list_link'] = array(
+    'field' => array(
+      'title' => t('Revisions list link'),
+      'help' => t('Provide a simple link to a node\'s revision list.'),
+      'handler' => 'monster_menus_views_handler_field_node_link_revisions',
+    ),
+  );
+
+  // ----------------------------------------------------------------------
+  // workflow_node table
+
+  // Add a modified version of workflow state, as defined in the workflow module
+  $data['workflow_node']['sid_mm'] = array(
+    'title' => t('Current state (MM)'), // Appears in views UI.
+    'help' => t('The current workflow state that the node is in.'),
+    'field' => array(
+      'real field' => 'sid',
+      'handler' => 'monster_menus_views_handler_field_sid',
+      'click sortable' => TRUE,
+     ),
+    'argument' => array(
+      'handler' => 'views_handler_argument_numeric',
+      'click sortable' => TRUE,
+      'numeric' => TRUE,
+    ),
+    'filter' => array(
+      'handler' => 'workflow_views_handler_filter_sid',
+      'numeric' => TRUE,
+    ),
+  );
+
+  return $data;
+}
+
+/**
+ * Implementation of hook_views_handlers().
+ */
+function monster_menus_views_views_handlers() {
+  return array(
+    'info' => array(
+      'path' => drupal_get_path('module', 'monster_menus_views'),
+    ),
+    'handlers' => array(
+      // argument handlers
+      // field handlers
+      'monster_menus_views_handler_field_node_link_revisions' => array(
+        'parent' => 'views_handler_field_node_link',
+      ),
+      'monster_menus_views_handler_field_node_link_edit' => array(
+        'parent' => 'views_handler_field_node_link',
+      ),
+      'monster_menus_views_handler_field_sid' => array(
+        'parent' => 'views_handler_field_node',
+      ),
+      // filter handlers
+      'monster_menus_views_handler_filter_recycled' => array(
+        'parent' => 'views_handler_filter_boolean_operator',
+      ),
+      // relationship handlers
+      // sort handlers
+    ),
+  );
+}

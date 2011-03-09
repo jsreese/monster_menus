@@ -1,0 +1,11 @@
+<?php
+// $Id: mm_schedule.install 3554 2009-11-06 20:55:49Z dan $
+
+/**
+ * @file
+ * Implementation of hook_install().
+ */
+function mm_schedule_install() {
+  // Make sure this module loads after fieldgroup (which uses weight=9)
+  db_query("UPDATE {system} SET weight = 10 WHERE name = 'mm_schedule'");
+}

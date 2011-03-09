@@ -1,0 +1,96 @@
+/* $Id: mm_tabbed_ui.css 3215 2009-08-19 15:39:48Z dan $ */
+/* theme_mm_tabbed_ui styles, taken from jqueryui */
+
+/* original flora styles */
+@media projection, screen {
+  .ui-tabs-hide {
+    display: none;
+  }
+}
+
+@media print {
+  .ui-tabs-nav {
+    display: none;
+  }
+}
+
+.ui-tabs-nav, .ui-tabs-panel {
+  font-family: "Trebuchet MS", Trebuchet, Verdana, Arial, sans-serif;
+  font-size: 12px;
+}
+
+.ui-tabs-nav {
+  float: left;
+  background: transparent;
+  border-bottom: solid 1px #C2C7DD;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 3px;
+}
+.ui-tabs-nav:after {
+  display: block;
+  clear: both;
+  content: " ";
+}
+
+.ui-tabs-nav li {
+  float: left;
+  margin: 0 0 0 2px;
+  font-weight: bold;
+}
+.ui-tabs-nav a, .ui-tabs-nav a span {
+  float: left;
+  padding: 0 12px;
+  background: none;
+}
+.ui-tabs-nav a {
+  margin: 5px 0 0 0;
+  padding-left: 0;
+  text-decoration: none;
+  white-space: nowrap;
+  outline: 0;
+  border-top: 1px solid #C2C7DD;
+  border-left: 1px solid #C2C7DD;
+  border-right: 1px solid #C2C7DD;
+}
+.ui-tabs-nav a:link, .ui-tabs-nav a:visited {
+  color: #663399;
+}
+.ui-tabs-nav a:hover {
+  color: #0033CC;
+  text-decoration: underline;
+}
+.ui-tabs-nav .ui-tabs-selected a {
+  position: relative;
+  z-index: 2;
+  margin-top: 0;
+  background: #F1F1FA none;
+}
+.ui-tabs-nav a {
+  padding-top: 1px;
+  padding-right: 0;
+  height: 13px;
+  display: block;
+  font: normal 12px "Trebuchet MS", Verdana, Arial;
+  color: #663399;
+  background: #E5E4EE /*url(widget_tab_bg.gif)*/ bottom;
+}
+.ui-tabs-nav .ui-tabs-selected a {
+  padding-top: 0;
+  height: 13px;
+  background: #F1F1FA none;
+}
+.ui-tabs-nav .ui-tabs-selected a:link, .ui-tabs-nav .ui-tabs-selected a:visited,
+.ui-tabs-nav .ui-tabs-disabled a:link, .ui-tabs-nav .ui-tabs-disabled a:visited {
+  cursor: text;
+  text-decoration: none;
+}
+.ui-tabs-nav a:hover, .ui-tabs-nav a:focus, .ui-tabs-nav a:active,
+.ui-tabs-nav .ui-tabs-unselect a:hover, .ui-tabs-nav .ui-tabs-unselect a:focus, .ui-tabs-nav .ui-tabs-unselect a:active {
+  cursor: pointer;
+}
+.ui-tabs-nav .ui-tabs-disabled a:link, .ui-tabs-nav .ui-tabs-disabled a:visited {
+  color: #000;
+}
+.ui-wrapper { border: 1px solid #50A029; }
+.ui-wrapper input, .ui-wrapper textarea { border: 0; }

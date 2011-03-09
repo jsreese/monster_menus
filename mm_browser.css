@@ -1,0 +1,270 @@
+/*
+** Tree browser in a table
+*/
+html, body {
+  height: 100%;
+  background: #E6E6F2;
+  font: 11px Verdana, Arial, sans-serif;
+}
+body.mm-page-wrapper {
+  height: auto;
+}
+body#mmtree-assist-properties {
+  background: #eee none;
+  }
+h4.mmtree-browse-title {
+  font-size: 15px;
+  color: #310067;
+}
+#mmtree-browse {
+  height: 100%;
+  text-align: left;
+  margin: 0;
+  padding: 0;
+  white-space: nowrap;
+}
+#mmtree-browse .links {
+  margin: 4px 0;
+  color: #666;
+  text-align: left;
+  font-weight: normal;
+}
+#mmtree-browse-thumbnails #mmtree-browse-thumbnail {
+  text-align: center;
+  padding: 4px;
+}
+#mmtree-browse-thumbnails th {
+  padding: 4px;
+}
+#mmtree-browse-thumbnails {
+  width: 100%;
+}
+.mmtree-browse-imagesingle {
+  float: left;
+  margin: 5px;
+  width: 106px;
+  height: 115px;
+  text-align:center;
+  border:solid 1px #333;
+  background-color: #E6E6F2;
+}
+.mmtree-browse-imagesingle .image {
+  margin: 3px;
+}
+.mmtree-browse-imagepreview {
+  height: 100px;
+  vertical-align: middle;
+}
+.mmtree-browse-imagepreview:hover {
+  background-color: #310067;
+  cursor: pointer;
+}
+/* Main wrapper class for entire browser */
+#mmtree-browse-browser {
+  height: 100%;
+  position: relative;
+  z-index: 1;
+}
+#mmtree-browse-browser .vsplitbar {
+  width: 6px;
+  background: #eee url(images/vgrippie.png) no-repeat center;
+  min-height: 100%;
+  cursor: col-resize;
+}
+#mmtree-browse-browser .vsplitbar.active {
+  opacity: 0.7;
+}
+/* Media Browser Navigation Pane (top pane with links)*/
+#mmtree-browse-nav, #mmtree-assist-nav {
+  padding: 1px 8px;
+  margin: -3px 0;
+  background: #310067;
+  height: 3.5em;
+  z-index: 2;
+}
+#mmtree-browse-nav a, #mmtree-assist-nav a {
+  font: bold 11px Arial, Verdana, sans-serif;
+}
+/* Media Browser Tree Pane (left pane with tree browser) */
+#mmtree-browse-tree {
+  background-color: #E6E6F2;
+  overflow: auto;
+  min-width: 300px;
+  width: 300px;
+  min-height: 100%;
+  position: absolute;
+}
+#mmtree-browse-tree .clicked {
+  background-color: #310067;
+  border-color: #310067;
+}
+#mmtree-browse-tree a.disabled {
+  color: #777;
+}
+#mmtree-browse-tree .mmtree-hidden {
+  color: #226;
+}
+#mmtree-browse-tree .jstree-clicked {
+  color: #fff;
+}
+.tree-classic li a.clicked {
+  color: #000;
+}
+/* Media Browser Content Pane (shows contents of current folder) */
+#mmtree-browse-items {
+  background-color: #FFFFFF;
+  position: absolute;
+  min-height: 100%;
+}
+#mmtree-browse-items .active {
+  opacity: 0.5;
+}
+.mmtree-browse-filecount {
+  font-size: 60%;
+  color: #333;
+}
+.jstree-clicked .mmtree-browse-filecount {
+  color: #fff;
+}
+.mmtree-browse-image {
+  width: 100px;
+  height: 100px;
+  margin: 3px;
+}
+.mmtree-browse-caption {
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mmtree-browse-caption a {
+  color: #fff;
+}
+h2.mmtree-assist-title {
+  color: #fff;
+  float: right;
+  padding-top: 0px;
+  margin-top: -2px;
+  font: 15px Helvetica Neue, Arial, Verdana, sans-serif;
+  font-weight: bold;
+}
+h4.mmtree-assist-title {
+  color: #000;
+  font: 15px Helvetica Neue, Arial, Verdana, sans-serif;
+  font-weight: bold;
+}
+#bookmarks {
+  z-index: 40;
+}
+.mm-browser-button-list {
+  display: none;
+}
+/* Preview */
+#mmtree-assist-preview .ui-widget-content {
+  background: #ccc none;
+  border: 0;
+  }
+#mmtree-assist-preview .ui-widget-header {
+  background: #444 none;
+  border: 0;
+  }
+
+/* Drop down menus */
+ /*
+   LEVEL ONE
+ */
+ ul.dropdown {
+  position: relative;
+  list-style: none;
+  text-decoration: none;
+  padding-left: 0;
+}
+ul.dropdown li {
+  font-weight: bold;
+  text-decoration: none;
+  float: left;
+  list-style: none;
+  margin: 0px 3px 3px 0px;
+}
+ul.dropdown a:hover {
+  color: #000;
+}
+ul.dropdown a:active {
+  background-position:0 -400px;
+}
+ul.dropdown li a {
+  padding: 2px 4px;
+  color: #310067;
+  background: #fff url(images/button_background.gif) repeat-x center;
+  text-decoration: none;
+}
+ul.dropdown li:last-child a {
+  border-right: none;
+}
+ul.dropdown li a.hover, ul.dropdown li a:hover {
+  color: #0033cc;
+  position: relative;
+}
+/*
+  LEVEL TWO
+*/
+ul.dropdown ul {
+  visibility: hidden;
+  position: absolute;
+  top: 100%;
+}
+ul.dropdown ul li {
+  font-weight: normal;
+  background: #eee;
+  color: #000;
+  border-bottom: 1px solid #ccc;
+  border-right: 1px solid #ccc;
+  border-left: 1px solid #ccc;
+  float: none;
+}
+/* IE 6 & 7 Needs Inline Block */
+ul.dropdown ul li a {
+  border-right: none;
+  width: 100%;
+  display: inline-block;
+}
+/*
+  LEVEL THREE
+*/
+ul.dropdown ul ul {
+  left: 100%;
+  top: 0;
+}
+ul.dropdown li:hover > ul {
+  visibility: visible;
+}
+.sub_menu {
+  z-index: 5;
+  padding-left: 0;
+}
+a.hilite {
+  background-color: yellow;
+}
+.fg-menu-container {
+  z-index: 1;
+}
+.fg-menu-footer {
+  z-index: 5;
+}
+.hidden {
+  position:absolute;
+  top:0;
+  left:-9999px;
+  width:1px;
+  height:1px;
+  overflow:hidden;
+}
+.dev-query {
+  clear: both;
+}
+.mmtree-browse-caption {
+  font: normal 10px/11px verdana;
+  padding: 1px 2px;
+  border: 0;
+  border-bottom: 1px solid #ccc;
+  background: #fff;
+  }

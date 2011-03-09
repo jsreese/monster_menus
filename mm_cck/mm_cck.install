@@ -1,0 +1,39 @@
+<?php
+// $Id: mm_cck.install 3554 2009-11-06 20:55:49Z dan $
+
+/**
+ * @file
+ * Implementation of hook_install().
+ */
+function mm_cck_install() {
+  drupal_load('module', 'content');
+  content_notify('install', 'mm_list');
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function mm_cck_uninstall() {
+  drupal_load('module', 'content');
+  content_notify('uninstall', 'mm_list');
+}
+
+/**
+ * Implementation of hook_enable().
+ *
+ * Notify content module when this module is enabled.
+ */
+function mm_cck_enable() {
+  drupal_load('module', 'content');
+  content_notify('enable', 'mm_list');
+}
+
+/**
+ * Implementation of hook_disable().
+ *
+ * Notify content module when this module is disabled.
+ */
+function mm_cck_disable() {
+  drupal_load('module', 'content');
+  content_notify('disable', 'mm_list');
+}

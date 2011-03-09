@@ -1,0 +1,8 @@
+; $Id: mm_workflow_access.info 2936 2009-06-02 20:13:15Z dan $
+name = MM Workflow Access
+description = Provides access control for workflow states based on Monster Menus groups.
+package = "Amherst"
+dependencies[] = workflow
+dependencies[] = monster_menus
+core = 6.x
+version = "6.x-1.0"

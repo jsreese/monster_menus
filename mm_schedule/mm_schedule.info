@@ -1,0 +1,10 @@
+; $Id: mm_schedule.info 3554 2009-11-06 20:55:49Z dan $
+name = MM Schedule
+description = Provides themes for the display of schedules and calendars
+package = Amherst
+version = "6.x-1.0"
+core = 6.x
+dependencies[] = monster_menus
+dependencies[] = views
+dependencies[] = date
+dependencies[] = calendar

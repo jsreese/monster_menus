@@ -1,0 +1,89 @@
+<?php
+// $Id: mm_workflow_access.install 3641 2009-12-10 21:59:47Z dan $
+
+/**
+ * @file
+ * Installer for mm_workflow_access
+ */
+
+/**
+ * Implementation of hook_install().
+ */
+function mm_workflow_access_install() {
+  drupal_install_schema('mm_workflow_access');
+  // Make sure our hooks get called after MM's. MM sets a weight of 100, so use 110.
+  db_query("UPDATE {system} SET weight = '110' WHERE filename LIKE '%/mm_workflow_access.module'");
+}
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function mm_workflow_access_uninstall() {
+  drupal_uninstall_schema('mm_workflow_access');
+}
+
+/**
+ * Implementation of hook_schema().
+ */
+function mm_workflow_access_schema() {
+  $schema['mm_workflow_access'] = array(
+    'fields' => array(
+      'sid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'mode' => array(
+        'type' => 'varchar',
+        'length' => '1',
+        'not null' => TRUE,
+      ),
+      'gid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+    ),
+    'primary key' => array('sid', 'mode', 'gid'),
+    'description' => 'Workflow permissions via MM groups',
+  );
+  $schema['mm_workflow_author'] = array(
+    'fields' => array(
+      'nid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'disp-width' => '11',
+      ),
+    ),
+    'primary key' => array('nid'),
+    'indexes' => array(
+      'uid' => array('uid'),
+    ),
+    'description' => 'Original author of a node in workflow',
+  );
+  return $schema;
+}
+
+/**
+ * Implementation of hook_mm_verify_integrity()
+ */
+function mm_workflow_access_mm_verify_integrity() {
+  return array('MM Workflow Access' => array(
+    t('mm_workflow_access.sid refers to missing workflow_states.sid') =>
+      "{mm_workflow_access} x LEFT JOIN {workflow_states} s ON s.sid=x.sid WHERE s.sid IS NULL",
+    t('mm_workflow_access.gid refers to missing mm_tree.mmtid') =>
+      "{mm_workflow_access} x LEFT JOIN {mm_tree} t ON t.mmtid=x.gid WHERE x.gid>0 AND t.mmtid IS NULL",
+
+    t('mm_workflow_author.nid refers to missing node.nid') =>
+      "{mm_workflow_author} x LEFT JOIN {node} n ON n.nid=x.nid WHERE n.nid IS NULL",
+    t('mm_workflow_author.uid refers to missing users.uid') =>
+      "{mm_workflow_author} x LEFT JOIN {users} u ON u.uid=x.uid WHERE u.uid IS NULL AND x.uid>0",
+  ));
+}

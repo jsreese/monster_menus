@@ -1,0 +1,54 @@
+#tb-body {
+  height: 125px;
+  font: 11px Helvetica Neue, Arial, Verdana, sans-serif;
+}
+#tb-manage-body {
+  font: 11px Helvetica Neue, Arial, Verdana, sans-serif;
+  background: none;
+  margin: 6px 0;
+}
+
+.manage-bookmarks-table td {
+  width: 35px;
+  text-align: right;
+}
+
+.manage-bookmarks-table td.tb-manage-name {
+  width: 170px;
+  text-align: left;
+}
+
+.manage-bookmarks-table {
+  width: 100%;
+}
+
+.manage-bookmarks-table form {
+  margin: 0;
+}
+
+#sortable {
+  list-style-type: none;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
+#sortable li {
+  margin: 0 3px 3px 3px;
+  padding: 0.4em;
+  padding-left: 1.5em;
+  font-size: 11px;
+}
+
+#sortable li.ui-sortable-helper:hover {
+  cursor: move;
+}
+
+#sortable li:hover {
+  cursor: pointer;
+}
+
+#sortable li span {
+  position: absolute;
+  margin-left: -1.3em;
+}

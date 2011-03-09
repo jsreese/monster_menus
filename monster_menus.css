@@ -1,0 +1,242 @@
+/* $Id: monster_menus.css 5036 2011-02-15 20:29:26Z vquinn $ */
+/*
+** MM browser in a table
+*/
+.browser {
+  border: none;
+  text-align:left;
+  margin: 0;
+  padding: 0;
+  white-space: nowrap;
+}
+.browser tbody {
+  border: none;
+}
+.browser .menu {
+  margin: 0 0 0 1.5em;
+  padding: 0;
+}
+.browser .menu .expanded {
+  list-style-type: circle;
+  list-style-image: url(../../../../misc/menu-expanded.png);
+  padding: 0.4em 0 0 0;
+  margin: 0;
+}
+.browser .menu .collapsed {
+  list-style-type: disc;
+  list-style-image: url(../../../../misc/menu-collapsed.png);
+  padding: 0.4em 0 0 0;
+  margin: 0;
+}
+.browser .leaf {
+  list-style-type: square;
+  list-style-image: url(../../../../misc/menu-leaf.png);
+  padding: 0.4em 0 0 0;
+  margin: 0;
+}
+.browser a {
+  text-decoration: none;
+}
+.browser a:active {
+}
+.browser a:hover {
+  text-decoration: underline;
+}
+.browser-action {
+  padding: 0 0.5em 6px 0;
+  margin: 0 0 0 1em;
+  color: #000;
+  white-space: nowrap;
+}
+body.browser .browser-action {
+  padding: 0.4em 0.5em 0 0;
+}
+
+/*
+** MM page list in node create/edit forms
+*/
+.mm-list, .mm-list a {
+  margin: 1px 3px 1px 3px;
+  padding: 2px 2px 2px 0;
+}
+.mm-list a {
+  text-decoration: none;
+  color: #606;
+}
+.mm-list-selected, .mm-list-selected a, .mm-list-selected a:hover {
+  text-decoration: none;
+  background-color: #000;
+  color: #fff;
+  margin: 1px 3px 1px 3px;
+  padding: 2px 2px 2px 0;
+}
+
+.mm-list-error {
+  border: 2px solid red;
+  padding: 4px;
+}
+
+.mm-admin-types {
+  border: 1px solid #ccc;
+  padding: 10px;
+  background-color: #ddd;
+}
+
+/* Tooltips */
+.tooltip-link {
+  text-decoration: none;
+  border-bottom: 1px #888 dotted;
+  background-color: #ffc;
+  color: #555;
+}
+.tooltip-link:hover {
+  background-color: #555;
+  color: #fff;
+}
+#PUContent table tbody {
+  border: none;
+}
+#PUContent li {
+  margin-left: -25px;
+  margin-right: 25px;
+  white-space: nowrap;
+}
+
+/* Permissions Solver */
+#mm-solver .tooltip-link {
+  border-bottom: none;
+  text-decoration: none;
+  background-color: inherit;
+  color: inherit;
+}
+#mm-solver .tooltip-link:hover {
+  background-color: inherit;
+  color: inherit;
+}
+#mm-solver-link {
+  float: right;
+}
+
+/* Permissions */
+#mm-permissions {
+  clear: both;
+}
+#mm-permissions .first-col {
+  width: 100%;
+}
+
+/* Yes/No checkmarks */
+.mm-yesno-yes {
+  color: #0c0;
+}
+.mm-yesno-no {
+  color: #c00;
+}
+
+.form-item label.disabled {
+  color: #777;
+}
+
+/* Search/ Replace */
+/*#mm-search-form .form-item, .mmsr-panel {
+  padding-bottom: 10px;
+  border-bottom: 1px #ccc solid;
+}
+
+#mm-search-form .form-item .form-item {
+  padding-bottom: 0;
+  border-bottom: none;
+}*/
+
+#search-settings_perms2 fieldset {
+  border: none;
+}
+
+.mmsr-cont-table, .mmsr-page-table, .mmsr-group-table {
+  width: 100%;
+}
+
+.mmsr-cont-table {
+  border-top:    2px #aca solid;
+  border-bottom: 2px #aca solid;
+}
+
+.mmsr-page-table {
+  border-top:    2px #dca solid;
+  border-bottom: 2px #dca solid;
+}
+
+.mmsr-group-table {
+  border-top:    2px #acd solid;
+  border-bottom: 2px #acd solid;
+}
+
+.mmsr-page-table td, .mmsr-cont-table td, .mmsr-group-table td {
+  padding: 1px 1px 2px 5px;
+}
+
+.mmsr-page-table td td, .mmsr-cont-table td td, .mmsr-group-table td td {
+  padding-left: 1px;
+}
+
+#mmsr-plus-minus {
+  white-space: nowrap;
+  width: 0;
+}
+
+#mmsr-widgets {
+  padding-left: 30px;
+}
+
+#mmsr-where {
+  white-space: nowrap;
+  padding: 5px 25px 5px 5px;
+}
+
+#mmsr-where a {
+  padding-left: 15px;
+  background: url(../../../../misc/menu-expanded.png) 5px 75% no-repeat;
+}
+
+#mmsr-where a.collapsed {
+  background-image: url(../../../../misc/menu-collapsed.png);
+  background-position: 5px 50%;
+}
+
+.mmsr-page-row {
+  border-top: 1px #dca solid;
+  background-color: #fec;
+}
+
+.mmsr-page-row-widgets {
+  background-color: #ffe;
+}
+
+.mmsr-group-row {
+  border-top: 1px #acd solid;
+  background-color: #cef;
+}
+
+.mmsr-group-row-widgets {
+  background-color: #eff;
+}
+
+.mmsr-cont-row {
+  border-top: 1px #aca solid;
+  background-color: #cec;
+}
+
+.mmsr-cont-row-widgets {
+  background-color: #efe;
+}
+
+#mmsr-status {
+}
+
+#mmsr-status input {
+  float: right;
+}
+
+#mmsr-status-text {
+  height: 13px;
+}

@@ -1,0 +1,224 @@
+<?php
+// $Id: mm_share_widget.module 4216 2010-06-25 18:36:37Z dan $
+
+/**
+ * @file
+ * Integrates Monster Menus with Share Widget from the Share module
+ */
+
+/*******************************************************************************
+ * Hook Functions (Drupal)
+ ******************************************************************************/
+
+/**
+ * Implementation of hook_menu().
+ */
+function mm_share_widget_menu() {
+  $items = array();
+  // Capture share data
+  $items['sharethis/process'] = array(
+    'title' => 'Process "Share this" data',
+    'page callback' => 'mm_share_widget_share_process',
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK);
+  return $items;
+}
+
+/**
+ * Implementation of hook_nodeapi().
+ */
+function mm_share_widget_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL) {
+  switch ($op) {
+    case 'delete':
+      db_query('DELETE FROM {mm_share_widget} WHERE nid = %d', $node->nid);
+      break;
+
+    case 'delete revision':
+      // Notice that we're matching a single revision based on the node's vid.
+      db_query('DELETE FROM {mm_share_widget} WHERE vid = %d', $node->vid);
+      break;
+
+    case 'load':
+      $node->share_links = array();
+      $result = db_query('SELECT share_id FROM {mm_share_widget} WHERE vid = %d', $node->vid);
+      while ($share = db_fetch_object($result))
+        $node->share_links[] = $share->share_id;
+      break;
+
+    case 'update':
+      if (!$node->revision) {
+        db_query('DELETE FROM {mm_share_widget} WHERE vid = %d', $node->vid);
+      }
+      // intentionally fall through
+    case 'insert':
+      if (is_array($node->share_links))
+        foreach (array_values($node->share_links) as $share_id)
+          if ($share_id) db_query('INSERT INTO {mm_share_widget} (nid, vid, share_id) VALUES(%d, %d, %d)', $node->nid, $node->vid, $share_id);
+      break;
+  }
+}
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function mm_share_widget_form_alter(&$form, $form_state, $form_id) {
+  if ($form_id == 'share_add_form') {
+    $form['#validate'][] = 'mm_share_widget_add_form_validate';
+  }
+  else if ($form_id == 'share_form' && $form['module']['#value'] == 'mm_share_widget') {
+    // Ask share_widget to generate the form code
+    $form['module']['#value'] = 'share_widget';
+    share_widget_form_alter($form, $form_state, $form_id);
+    $form['module']['#value'] = 'mm_share_widget';
+  }
+  else if (isset($form['type']) && isset($form['#node']) && $form['type']['#value'] . '_node_form' == $form_id) {
+    $node = $form['#node'];
+
+    $shares = share_get_widgets('link', $node->type, 'mm_share_widget');
+    if (count($shares)) {
+      $share_checks = array();
+      foreach ($shares as $share) {
+        $share = share_load($share->share_id);
+        $share_checks[$share->share_id] = t('Show the %name link', array('%name' => $share->name));
+      }
+
+      if ($node->nid) $share_values = $node->share_links;
+      else {
+        mm_parse_args($mmtids, $oarg_list, $this_mmtid);
+        $share_values = array();
+        if ($this_mmtid) {
+          $shares = mm_content_resolve_cascaded_setting('share_default', $this_mmtid, $share_at, $share_parent);
+
+          foreach ($shares as $share => $value)
+            if ($value == 1) $share_values[$share] = $share;
+        }
+      }
+      $form['mm_appearance']['share_links'] = array(
+        '#type' => 'checkboxes',
+        '#options' => $share_checks,
+        '#default_value' => $share_values,
+      );
+    }
+  }
+  else if ($form_id == 'mm_ui_content_edit') {
+    if (!isset($form['is_group'])) {
+
+      $form['settings_appearance']['new_nodes']['share_default'] = array(
+        '#tree' => TRUE,
+      );
+
+      $settings = isset($form['is_new']) ? array() : mm_content_get_cascaded_settings($form['path']['#value']);
+      foreach (share_get_widgets('link', $node->type, 'mm_share_widget') as $share) {
+        $share = share_load($share->share_id);
+        $form['settings_appearance']['new_nodes']['share_default'][$share->share_id] = array(
+          '#type' => 'select',
+          '#title' => t('Default %name link setting', array('%name' => $share->name)),
+          '#default_value' => isset($settings['share_default'][$share->share_id]) ? $settings['share_default'][$share->share_id] : -1,
+          '#options' => array(-1 => t('(inherit from parent page)'), 1 => t('Show'), 0 => t('Hide')),
+        );
+      }
+    }
+  }
+}
+
+/*******************************************************************************
+ * Hook Functions (Share)
+ ******************************************************************************/
+
+/**
+ * Implementation of hook_share_info().
+ */
+function mm_share_widget_share_info() {
+  return array(
+    'name' => t('MM Share'),
+    'module' => 'share_widget',
+    'widget' => array(
+      'module' => 'mm_share_widget',
+      'label' => t('MM Share'),
+      'name' => t('MM Share'),
+      'effects' => 1,
+      'tabs' => share_widget_default_tabs()
+    )
+  );
+}
+
+/**
+ * Implementation of hook_share().
+ */
+function mm_share_widget_share($op, $share) {
+  switch ($op) {
+    case 'delete':
+      db_query('DELETE FROM {mm_share_widget} WHERE share_id = %d', $share->share_id);
+      break;
+  }
+  return share_widget_share($op, $share);
+}
+
+/**
+ * Implementation of hook_share_render().
+ */
+function mm_share_widget_share_render($op, $share, $node = NULL) {
+  drupal_add_js(
+    'Drupal.behaviors.mmShareWidgetRender = function(context) {                
+        $(".service-links a[rel=nofollow]:not(.service-links-mm-share-render-processed)", context)
+          .addClass("service-links-mm-share-render-processed")
+          .click(function() {
+            $("#mm_share_results")
+              .load("' . url('sharethis/process') . '", {url: this.href});
+            });        
+      };', 'inline');
+  return share_widget_share_render($op, $share, $node);
+}
+
+/**
+ * Implementation of hook_footer().
+ */
+function mm_share_widget_footer() {
+  return '<div id="mm_share_results"></div>';
+}
+
+/*******************************************************************************
+ * Hook Functions (MM)
+ ******************************************************************************/
+
+function mm_share_widget_mm_cascaded_settings() {
+  return array('share_default' => array('data_type' => 'int', 'multiple' => TRUE, 'use_keys' => TRUE));
+}
+
+/*******************************************************************************
+ * Callback Functions, Forms, and Tables
+ ******************************************************************************/
+
+function mm_share_widget_add_form_validate($form, &$form_state) {
+  if ($form_state['values']['module'] == 'mm_share_widget') {
+    $tabs = module_implements('share_tab');
+    if (empty($tabs)) {
+      form_set_error('module', t('The Share widget requires at least one tab module to be enabled.'));
+    }
+  }
+}
+
+/*******************************************************************************
+ * Module and Helper Functions
+ ******************************************************************************/
+
+function mm_share_widget_share_process() {
+  global $user;
+
+  $services = general_services_service_links();
+  $url = urldecode($_POST['url']);
+  $main_url = substr($url, 0, strpos($url, '?'));
+  foreach ($services as $key => $value) {
+    if (substr($value['link'], 0, strpos($value['link'], '?')) == $main_url) { // This will not work with Technorati
+      $service_type = $key;
+      break;
+    }
+  }
+
+  if (empty($service_type)) $service_type = 'unknown';
+  $GLOBALS['devel_shutdown'] = FALSE;
+  if (!empty($url)) {
+    db_query("INSERT INTO {mm_share_log} SET share_type = '%s', share_url = '%s', uid = %d, ctime = %d", $service_type, $url, $user->uid, time());
+  }
+  exit;
+}

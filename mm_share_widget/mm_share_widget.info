@@ -1,0 +1,8 @@
+; $Id: mm_share_widget.info 3024 2009-06-19 18:51:51Z dan $
+name = MM Share widget
+description = "Integrates Monster Menus with Share Widget"
+dependencies[] = share
+dependencies[] = share_widget
+dependencies[] = monster_menus
+package = Amherst
+core = 6.x

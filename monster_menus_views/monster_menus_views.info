@@ -1,0 +1,7 @@
+; $Id: monster_menus_views.info 3860 2010-02-15 20:33:40Z dwilga $
+name = Monster Menus Views
+description = Views integration for Monster Menus
+package = Amherst
+version = "6.x-1.0"
+core = 6.x
+dependencies[] = monster_menus

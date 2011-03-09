@@ -1,0 +1,8 @@
+; $Id: mm_cck.info 3554 2009-11-06 20:55:49Z dan $
+name = MM CCK
+description = CCK integration for Monster Menus
+package = Amherst
+version = "6.x-1.0"
+core = 6.x
+dependencies[] = monster_menus
+dependencies[] = content
